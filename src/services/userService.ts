@@ -9,9 +9,7 @@ import {
   getDocs,
   orderBy,
   limit,
-  serverTimestamp,
   increment,
-  Timestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { User, AdminSettings } from '../types';
@@ -57,7 +55,7 @@ export const createUserProfile = async (
     displayName,
     photoURL: '',
     referralCode: userReferralCode,
-    referredBy: referrerId ?? null,  // ✅ Fixed: undefined → null
+    referredBy: referrerId ?? null, // ✅ Fix: undefined → null
     role: 'user',
     isBlocked: false,
     createdAt: now,
@@ -73,7 +71,7 @@ export const createUserProfile = async (
   };
 
   await setDoc(doc(db, 'users', uid), userData);
-  
+
   if (totalBonus > 0) {
     await addTransaction(uid, 'bonus', totalBonus, `Signup bonus + referral bonus`);
   }
@@ -190,7 +188,3 @@ export const getTopLeaderboard = async (limitCount: number = 10) => {
     rank: i + 1,
   }));
 };
-
-// Suppress unused variable warning for Timestamp
-void Timestamp;
-void serverTimestamp;
