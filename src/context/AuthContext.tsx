@@ -9,6 +9,7 @@ import {
   sendPasswordResetEmail,
 } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
+import { useNavigate } from 'react-router-dom';
 import { auth, db } from '../firebase/config';
 import { User } from '../types';
 import { createUserProfile, getUserProfile } from '../services/userService';
@@ -35,6 +36,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [userProfile, setUserProfile] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const navigate = useNavigate();
 
   const refreshProfile = useCallback(async () => {
     if (currentUser) {
@@ -46,29 +48,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [currentUser]);
 
+  // ✅ Fix: sirf onAuthStateChanged se currentUser set karo
+  // onSnapshot wala listener profile real-time sync karega — duplicate getUserProfile() call hataya
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
-      if (user) {
-        try {
-          const profile = await getUserProfile(user.uid);
-          if (profile) {
-            setUserProfile(profile);
-            setIsAdmin(profile.role === 'admin');
-          }
-        } catch (error) {
-          console.error('Error loading user profile:', error);
-        }
-      } else {
+      if (!user) {
         setUserProfile(null);
         setIsAdmin(false);
+        setLoading(false);
       }
-      setLoading(false);
     });
-
     return unsubscribe;
   }, []);
 
+  // ✅ Fix: Firestore real-time listener — yahi kaafi hai, getUserProfile() alag se nahi chahiye
   useEffect(() => {
     if (!currentUser) return;
 
@@ -80,9 +74,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUserProfile(profile);
           setIsAdmin(profile.role === 'admin');
         }
+        setLoading(false);
       },
       (error) => {
         console.error('Firestore listener error:', error);
+        setLoading(false);
       }
     );
 
@@ -95,6 +91,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await updateProfile(user, { displayName: name });
       await createUserProfile(user.uid, email, name, referralCode);
       toast.success('Account created successfully! Welcome bonus added! 🎉');
+      navigate('/dashboard'); // ✅ Fix: signup ke baad redirect
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : 'Signup failed';
       toast.error(msg.replace('Firebase: ', '').replace('(auth/', '').replace(')', ''));
@@ -106,6 +103,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await signInWithEmailAndPassword(auth, email, password);
       toast.success('Welcome back! 🎮');
+      navigate('/dashboard'); // ✅ Fix: login ke baad redirect
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : 'Login failed';
       toast.error(msg.replace('Firebase: ', '').replace('(auth/', '').replace(')', ''));
@@ -118,6 +116,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUserProfile(null);
     setIsAdmin(false);
     toast.success('Logged out successfully');
+    navigate('/auth'); // ✅ Fix: logout ke baad auth page pe bhejo
   };
 
   const resetPassword = async (email: string) => {
