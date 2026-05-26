@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -41,8 +41,8 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  // Generate mock chart data based on user activity
-  const chartData = Array.from({ length: 7 }, (_, i) => {
+  // ✅ Fix: useMemo use karo taaki har re-render pe naya random data na bane
+  const chartData = useMemo(() => Array.from({ length: 7 }, (_, i) => {
     const day = new Date();
     day.setDate(day.getDate() - (6 - i));
     return {
@@ -50,7 +50,7 @@ const Dashboard: React.FC = () => {
       earnings: Math.floor(Math.random() * 500) + 100,
       losses: Math.floor(Math.random() * 200) + 50,
     };
-  });
+  }), []);
 
   const games = [
     { name: 'Color Prediction', icon: '🎨', path: '/games/color', desc: 'Predict the winning color', color: 'from-pink-500/20 to-red-500/20 border-pink-500/30', enabled: settings?.colorGameEnabled },
