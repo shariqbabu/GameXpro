@@ -84,12 +84,12 @@ const Profile: React.FC = () => {
       >
         <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
           {/* Avatar */}
-          <div className="relative">
+          <div className="relative flex-shrink-0">
             <div className="w-24 h-24 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center text-4xl font-bold overflow-hidden ring-4 ring-purple-500/30">
               {userProfile?.photoURL ? (
                 <img src={userProfile.photoURL} alt="Profile" className="w-full h-full object-cover" />
               ) : (
-                userProfile?.displayName?.[0]?.toUpperCase() || '?'
+                <span>{userProfile?.displayName?.[0]?.toUpperCase() || '?'}</span>
               )}
             </div>
             <button
@@ -100,21 +100,21 @@ const Profile: React.FC = () => {
               {uploading ? '⏳' : '📷'}
             </button>
             <input ref={fileRef} type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />
-          </div>
 
-          {/* Upload Progress */}
-          {uploading && (
-            <div className="absolute mt-28 ml-0 w-24">
-              <div className="h-1 bg-white/10 rounded-full overflow-hidden">
-                <div className="h-full bg-purple-500 rounded-full transition-all" style={{ width: `${uploadProgress}%` }} />
+            {/* ✅ Fix: Upload progress bar — ab sahi jagah hai */}
+            {uploading && (
+              <div className="mt-2 w-24">
+                <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+                  <div className="h-full bg-purple-500 rounded-full transition-all" style={{ width: `${uploadProgress}%` }} />
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Info */}
           <div className="flex-1 text-center sm:text-left">
             {editing ? (
-              <div className="flex gap-2 items-center mb-2">
+              <div className="flex gap-2 items-center mb-2 flex-wrap">
                 <input
                   value={name}
                   onChange={e => setName(e.target.value)}
@@ -130,7 +130,7 @@ const Profile: React.FC = () => {
               </div>
             )}
             <p className="text-gray-400 text-sm mb-2">{userProfile?.email}</p>
-            <div className="flex items-center gap-2 justify-center sm:justify-start">
+            <div className="flex items-center gap-2 justify-center sm:justify-start flex-wrap">
               <span className={`text-xs px-2 py-1 rounded-full ${userProfile?.role === 'admin' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' : 'bg-purple-500/20 text-purple-400 border border-purple-500/30'}`}>
                 {userProfile?.role === 'admin' ? '⚙️ Admin' : '🎮 Gamer'}
               </span>
@@ -207,7 +207,7 @@ const Profile: React.FC = () => {
           <p className="text-gray-400 text-xs font-mono flex-1 truncate">{userProfile?.uid}</p>
           <button
             onClick={() => { copyToClipboard(userProfile?.uid || ''); toast.success('UID copied!'); }}
-            className="text-gray-500 hover:text-white text-xs transition-colors"
+            className="text-gray-500 hover:text-white text-xs transition-colors flex-shrink-0"
           >
             📋
           </button>
