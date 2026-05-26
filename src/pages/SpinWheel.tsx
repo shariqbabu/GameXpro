@@ -1,36 +1,54 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
-import { updateUserProfile, addTransaction } from '../services/userService';
+import { doc, updateDoc, increment } from 'firebase/firestore';
+import { db } from '../firebase/config';
+import { addTransaction } from '../services/userService';
 import { formatCurrency } from '../utils/helpers';
 import toast from 'react-hot-toast';
 
 const segments = [
-  { label: '₹10', value: 10, color: '#ef4444', prob: 0.3 },
-  { label: '₹50', value: 50, color: '#f59e0b', prob: 0.25 },
-  { label: '₹100', value: 100, color: '#22c55e', prob: 0.2 },
-  { label: '₹200', value: 200, color: '#3b82f6', prob: 0.12 },
-  { label: '₹500', value: 500, color: '#7c3aed', prob: 0.08 },
-  { label: '₹1000', value: 1000, color: '#ec4899', prob: 0.04 },
-  { label: 'Try Again', value: 0, color: '#6b7280', prob: 0.01 },
+  { label: '₹10', value: 10, color: '#ef4444' },
+  { label: '₹50', value: 50, color: '#f59e0b' },
+  { label: '₹100', value: 100, color: '#22c55e' },
+  { label: '₹200', value: 200, color: '#3b82f6' },
+  { label: '₹500', value: 500, color: '#7c3aed' },
+  { label: '₹1000', value: 1000, color: '#ec4899' },
+  { label: 'Try Again', value: 0, color: '#6b7280' },
 ];
 
+// Probabilities hidden from UI — internal only
+const segmentProbs = [0.3, 0.25, 0.2, 0.12, 0.08, 0.04, 0.01];
+
+const getTodayKey = (uid: string) => `spins_${new Date().toDateString()}_${uid}`;
+const MAX_SPINS = 3;
+
 const SpinWheel: React.FC = () => {
-  const { userProfile, refreshProfile } = useAuth();
+  const { userProfile } = useAuth();
   const [spinning, setSpinning] = useState(false);
   const [rotation, setRotation] = useState(0);
   const [result, setResult] = useState<typeof segments[0] | null>(null);
-  const [spinsToday, setSpinsToday] = useState(0);
   const [history, setHistory] = useState<{ label: string; value: number; time: string }[]>([]);
   const wheelRef = useRef<HTMLDivElement>(null);
-  const MAX_SPINS = 3;
+
+  // ✅ Fix: localStorage se spins load karo taaki page refresh pe reset na ho
+  const [spinsToday, setSpinsToday] = useState(() => {
+    if (!userProfile?.uid) return 0;
+    return Number(localStorage.getItem(getTodayKey(userProfile.uid)) || 0);
+  });
+
+  useEffect(() => {
+    if (!userProfile?.uid) return;
+    const saved = Number(localStorage.getItem(getTodayKey(userProfile.uid)) || 0);
+    setSpinsToday(saved);
+  }, [userProfile?.uid]);
 
   const getWeightedResult = () => {
     const rand = Math.random();
     let cumulative = 0;
-    for (const segment of segments) {
-      cumulative += segment.prob;
-      if (rand <= cumulative) return segment;
+    for (let i = 0; i < segments.length; i++) {
+      cumulative += segmentProbs[i];
+      if (rand <= cumulative) return segments[i];
     }
     return segments[0];
   };
@@ -52,22 +70,26 @@ const SpinWheel: React.FC = () => {
     setTimeout(async () => {
       setResult(winner);
       setSpinning(false);
-      setSpinsToday(prev => prev + 1);
 
-      if (winner.value > 0 && userProfile) {
+      // ✅ Fix: localStorage mein save karo
+      const newCount = spinsToday + 1;
+      setSpinsToday(newCount);
+      localStorage.setItem(getTodayKey(userProfile.uid), String(newCount));
+
+      if (winner.value > 0) {
         try {
-          await updateUserProfile(userProfile.uid, {
-            walletBalance: (userProfile.walletBalance || 0) + winner.value,
-            bonusAmount: (userProfile.bonusAmount || 0) + winner.value,
-            totalPoints: (userProfile.totalPoints || 0) + winner.value,
+          // ✅ Fix: stale state ki jagah Firestore increment use karo
+          await updateDoc(doc(db, 'users', userProfile.uid), {
+            walletBalance: increment(winner.value),
+            bonusAmount: increment(winner.value),
+            totalPoints: increment(winner.value),
           });
           await addTransaction(userProfile.uid, 'bonus', winner.value, `Spin wheel reward - ${winner.label}`);
-          await refreshProfile();
           toast.success(`🎉 You won ${winner.label}!`);
         } catch {
           toast.error('Error processing reward');
         }
-      } else if (winner.value === 0) {
+      } else {
         toast('Better luck next time! 🍀');
       }
 
@@ -103,7 +125,7 @@ const SpinWheel: React.FC = () => {
                   className={`w-3 h-3 rounded-full transition-all ${i < spinsToday ? 'bg-gray-600' : 'bg-purple-500 glow-purple'}`}
                 />
               ))}
-              <span className="text-gray-400 text-xs ml-2">{MAX_SPINS - spinsToday} spins left</span>
+              <span className="text-gray-400 text-xs ml-2">{MAX_SPINS - spinsToday} spins left today</span>
             </div>
 
             {/* Wheel Container */}
@@ -162,7 +184,6 @@ const SpinWheel: React.FC = () => {
                       </g>
                     );
                   })}
-                  {/* Center circle */}
                   <circle cx="100" cy="100" r="15" fill="#1a1a2e" stroke="rgba(255,255,255,0.2)" strokeWidth="2" />
                   <text x="100" y="105" textAnchor="middle" fill="white" fontSize="12">🎮</text>
                 </svg>
@@ -208,7 +229,7 @@ const SpinWheel: React.FC = () => {
             <p className="text-green-400 font-orbitron font-bold text-2xl">{formatCurrency(userProfile?.walletBalance || 0)}</p>
           </motion.div>
 
-          {/* Prizes */}
+          {/* ✅ Fix: Prizes list se probabilities hatayi — users ko nahi dikhani chahiye */}
           <motion.div
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
@@ -218,12 +239,9 @@ const SpinWheel: React.FC = () => {
             <h3 className="text-white font-semibold mb-3">🎁 Possible Prizes</h3>
             <div className="space-y-1.5">
               {segments.map((seg) => (
-                <div key={seg.label} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: seg.color }} />
-                    <span className="text-white text-sm">{seg.label}</span>
-                  </div>
-                  <span className="text-gray-400 text-xs">{Math.round(seg.prob * 100)}%</span>
+                <div key={seg.label} className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: seg.color }} />
+                  <span className="text-white text-sm">{seg.label}</span>
                 </div>
               ))}
             </div>
