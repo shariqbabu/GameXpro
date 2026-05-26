@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -41,11 +41,25 @@ const Wallet: React.FC = () => {
     { name: 'Referral', value: userProfile?.referralEarnings || 0, color: '#a855f7' },
   ].filter(d => d.value > 0);
 
-  const barData = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (6 - i));
-    return { day: d.toLocaleDateString('en', { weekday: 'short' }), deposits: Math.random() * 500, withdrawals: Math.random() * 200 };
-  });
+  // ✅ Fix: Real transaction data se bar chart banao, random nahi
+  const barData = useMemo(() => {
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - i));
+      const dayStr = d.toDateString();
+      const dayLabel = d.toLocaleDateString('en', { weekday: 'short' });
+
+      const dayDeposits = deposits
+        .filter(dep => new Date(dep.createdAt).toDateString() === dayStr && dep.status === 'approved')
+        .reduce((sum: number, dep: any) => sum + (dep.amount || 0), 0);
+
+      const dayWithdrawals = withdrawals
+        .filter(wd => new Date(wd.createdAt).toDateString() === dayStr && wd.status === 'approved')
+        .reduce((sum: number, wd: any) => sum + (wd.amount || 0), 0);
+
+      return { day: dayLabel, deposits: dayDeposits, withdrawals: dayWithdrawals };
+    });
+  }, [deposits, withdrawals]);
 
   const tabs = ['overview', 'deposits', 'withdrawals', 'transactions'] as const;
 
@@ -140,16 +154,20 @@ const Wallet: React.FC = () => {
 
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass border border-white/10 rounded-2xl p-5">
             <h3 className="text-white font-semibold mb-4">📊 Weekly Activity</h3>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={barData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                <XAxis dataKey="day" stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 10 }} />
-                <YAxis stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 10 }} />
-                <Tooltip contentStyle={{ background: 'rgba(15,15,25,0.95)', border: '1px solid rgba(124,58,237,0.3)', borderRadius: '8px', color: '#fff' }} />
-                <Bar dataKey="deposits" fill="#22c55e" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="withdrawals" fill="#ef4444" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            {loading ? (
+              <div className="h-48 flex items-center justify-center text-gray-500 text-sm">Loading...</div>
+            ) : (
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={barData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                  <XAxis dataKey="day" stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 10 }} />
+                  <YAxis stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 10 }} />
+                  <Tooltip contentStyle={{ background: 'rgba(15,15,25,0.95)', border: '1px solid rgba(124,58,237,0.3)', borderRadius: '8px', color: '#fff' }} />
+                  <Bar dataKey="deposits" fill="#22c55e" radius={[4, 4, 0, 0]} name="Deposits" />
+                  <Bar dataKey="withdrawals" fill="#ef4444" radius={[4, 4, 0, 0]} name="Withdrawals" />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </motion.div>
         </div>
       )}
