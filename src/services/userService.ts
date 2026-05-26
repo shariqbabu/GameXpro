@@ -57,7 +57,7 @@ export const createUserProfile = async (
     displayName,
     photoURL: '',
     referralCode: userReferralCode,
-    referredBy: referrerId,
+    referredBy: referrerId ?? null,  // ✅ Fixed: undefined → null
     role: 'user',
     isBlocked: false,
     createdAt: now,
@@ -146,7 +146,6 @@ export const getAdminSettings = async (): Promise<AdminSettings> => {
   if (docSnap.exists()) {
     return docSnap.data() as AdminSettings;
   }
-  // Default settings
   const defaults: AdminSettings = {
     signupBonus: 50,
     referralBonus: 100,
