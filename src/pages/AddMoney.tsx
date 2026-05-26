@@ -43,7 +43,7 @@ const AddMoney: React.FC = () => {
 
     setSubmitting(true);
     let screenshotUrl = '';
-    
+
     try {
       if (screenshot) {
         setUploading(true);
@@ -84,28 +84,22 @@ const AddMoney: React.FC = () => {
           className="glass border border-white/10 rounded-2xl p-6 text-center"
         >
           <h3 className="text-white font-semibold mb-4">📱 Scan QR Code to Pay</h3>
-          
+
+          {/* ✅ Fix: Random dots hata diye — real QR ya static placeholder */}
           {settings?.paymentQrUrl ? (
-            <img src={settings.paymentQrUrl} alt="Payment QR" className="w-48 h-48 mx-auto rounded-xl border border-white/10" />
+            <img src={settings.paymentQrUrl} alt="Payment QR" className="w-48 h-48 mx-auto rounded-xl border border-white/10 object-contain" />
           ) : (
-            <div className="w-48 h-48 mx-auto bg-white rounded-xl flex items-center justify-center">
-              {/* Generated QR placeholder */}
-              <div className="w-40 h-40 grid grid-cols-8 gap-0.5">
-                {Array.from({ length: 64 }, (_, i) => (
-                  <div
-                    key={i}
-                    className={`${Math.random() > 0.5 ? 'bg-black' : 'bg-white'} rounded-sm`}
-                  />
-                ))}
-              </div>
+            <div className="w-48 h-48 mx-auto bg-white/5 border-2 border-dashed border-white/20 rounded-xl flex flex-col items-center justify-center">
+              <span className="text-4xl mb-2">📷</span>
+              <p className="text-gray-400 text-xs text-center px-4">QR Code not set.<br />Contact admin.</p>
             </div>
           )}
-          
+
           <div className="mt-4 p-3 bg-white/5 rounded-xl">
             <p className="text-gray-400 text-xs mb-1">UPI ID</p>
             <p className="text-white font-medium">{settings?.upiId || 'gamezone@upi'}</p>
           </div>
-          
+
           <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
             <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-2">
               <p className="text-gray-400 text-xs">Min Deposit</p>
@@ -131,7 +125,7 @@ const AddMoney: React.FC = () => {
           className="glass border border-white/10 rounded-2xl p-6"
         >
           <h3 className="text-white font-semibold mb-4">💰 Payment Details</h3>
-          
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="text-gray-400 text-sm mb-2 block">Amount (₹)</label>
