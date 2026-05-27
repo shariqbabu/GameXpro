@@ -31,63 +31,83 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const fetchUserProfile = async (uid: string) => {
     try {
-      const userDoc = await getDoc(doc(db, 'users', uid));
-     const fetchUserProfile = async (uid: string) => {
-  try {
-    const userRef = doc(db, 'users', uid);
-    const userDoc = await getDoc(userRef);
+      const userRef = doc(db, 'users', uid);
+      const userDoc = await getDoc(userRef);
 
-    if (userDoc.exists()) {
-      const data = userDoc.data();
+      if (userDoc.exists()) {
+        const data = userDoc.data();
 
-      setUserProfile({
-        uid,
-        ...data,
-      } as User);
+        setUserProfile({
+          uid,
+          ...data,
+        } as User);
 
-    } else {
-      console.log('User profile not found in Firestore');
+      } else {
+        console.log('User profile not found in Firestore');
+        setUserProfile(null);
+      }
+
+    } catch (error) {
+      console.error('Fetch profile error:', error);
       setUserProfile(null);
     }
-
-  } catch (error) {
-    console.error('Fetch profile error:', error);
-    setUserProfile(null);
-  }
-};
+  };
 
   const refreshProfile = async () => {
-    if (currentUser) {
-      await fetchUserProfile(currentUser.uid);
-    }
+    if (!currentUser?.uid) return;
+
+    await fetchUserProfile(currentUser.uid);
   };
 
   const logout = async () => {
     try {
       await signOut(auth);
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
       setUserProfile(null);
-    } catch {
-      setUserProfile(null);
+      setCurrentUser(null);
     }
   };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setCurrentUser(user);
-      if (user) {
-        await fetchUserProfile(user.uid);
-      } else {
+      try {
+        setLoading(true);
+
+        setCurrentUser(user);
+
+        if (user?.uid) {
+          await fetchUserProfile(user.uid);
+        } else {
+          setUserProfile(null);
+        }
+
+      } catch (error) {
+        console.error('Auth state error:', error);
         setUserProfile(null);
+
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     });
-    return unsubscribe;
+
+    return () => unsubscribe();
   }, []);
 
   const isAdmin = userProfile?.role === 'admin';
 
   return (
-    <AuthContext.Provider value={{ currentUser, userProfile, loading, isAdmin, logout, refreshProfile }}>
+    <AuthContext.Provider
+      value={{
+        currentUser,
+        userProfile,
+        loading,
+        isAdmin,
+        logout,
+        refreshProfile,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
