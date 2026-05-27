@@ -12,7 +12,6 @@ import {
   settlePrize, type LudoGameDoc,
 } from '../../services/ludoService';
 
-// ─── Board path: 52 cells, each = [col, row] on 15×15 grid ───────────────────
 const PATH: [number, number][] = [
   [1,6],[2,6],[3,6],[4,6],[5,6],
   [6,5],[6,4],[6,3],[6,2],[6,1],[6,0],
@@ -33,7 +32,6 @@ const P2_HOME: [number, number][] = [[9.5,1.5],[11.5,1.5],[9.5,3.5],[11.5,3.5]];
 const DICE_FACES = ['⚀','⚁','⚂','⚃','⚄','⚅'];
 const ENTRY_FEES = [50, 100, 200, 500, 1000, 2000];
 
-// ─── Canvas board renderer ────────────────────────────────────────────────────
 function drawBoard(canvas: HTMLCanvasElement, game: LudoGameDoc) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
@@ -46,7 +44,6 @@ function drawBoard(canvas: HTMLCanvasElement, game: LudoGameDoc) {
   (ctx as any).roundRect?.(0, 0, S, S, 12);
   ctx.fill();
 
-  // Cells
   for (let r = 0; r < 15; r++) {
     for (let c = 0; c < 15; c++) {
       const x = c * cs, y = r * cs;
@@ -79,7 +76,6 @@ function drawBoard(canvas: HTMLCanvasElement, game: LudoGameDoc) {
     }
   }
 
-  // Home base circles
   const homeCircles = (homes: [number,number][], col: 'red'|'blue') => {
     homes.forEach(([cx, cy]) => {
       ctx.beginPath(); ctx.arc(cx * cs, cy * cs, cs * 0.37, 0, Math.PI * 2);
@@ -90,7 +86,6 @@ function drawBoard(canvas: HTMLCanvasElement, game: LudoGameDoc) {
   };
   homeCircles(P1_HOME, 'red'); homeCircles(P2_HOME, 'blue');
 
-  // Center triangles
   ctx.fillStyle = 'rgba(200,168,75,0.1)';
   const tri = (pts: [number,number][]) => {
     ctx.beginPath();
@@ -102,7 +97,6 @@ function drawBoard(canvas: HTMLCanvasElement, game: LudoGameDoc) {
   ctx.font = `${cs * 1.1}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText('♛', 8 * cs, 8 * cs);
 
-  // Draw goti helper
   const drawGoti = (cx: number, cy: number, r: number, base: string, light: string, label: string, active: boolean) => {
     ctx.beginPath(); ctx.arc(cx, cy + r * 0.3, r * 0.65, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fill();
@@ -127,19 +121,16 @@ function drawBoard(canvas: HTMLCanvasElement, game: LudoGameDoc) {
   const p1Active = game.currentTurn === game.player1.uid;
   const p2Active = game.player2 && game.currentTurn === game.player2.uid;
 
-  // P1 home gotis
   let p1hi = 0;
   game.player1.gotiPos.forEach((pos, i) => {
     if (pos === -1) { const [cx,cy] = P1_HOME[p1hi++]; drawGoti(cx*cs, cy*cs, cs*0.34, '#D63031','#FF7675', String(i+1), !!p1Active); }
   });
 
-  // P2 home gotis
   let p2hi = 0;
   game.player2?.gotiPos.forEach((pos, i) => {
     if (pos === -1) { const [cx,cy] = P2_HOME[p2hi++]; drawGoti(cx*cs, cy*cs, cs*0.34, '#0984E3','#74B9FF', String(i+1), !!p2Active); }
   });
 
-  // On-board gotis
   game.player1.gotiPos.forEach((pos, i) => {
     if (pos >= 0) { const [c,r] = PATH[pos]; drawGoti((c+0.5)*cs,(r+0.5)*cs, cs*0.37,'#D63031','#FF7675',String(i+1),!!p1Active); }
   });
@@ -148,7 +139,6 @@ function drawBoard(canvas: HTMLCanvasElement, game: LudoGameDoc) {
   });
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
 type UIPhase = 'lobby' | 'matchmaking' | 'in_game' | 'game_over';
 
 export const LudoGame = () => {
@@ -163,177 +153,141 @@ export const LudoGame = () => {
   const [myRole,    setMyRole]    = useState<'player1'|'player2'>('player1');
   const [diceDisp,  setDiceDisp]  = useState('⚄');
   const [rolling,   setRolling]   = useState(false);
-  const [mmSeconds, setMmSeconds] = useState(0); // matchmaking wait time
+  const [mmSeconds, setMmSeconds] = useState(0);
   const [log,       setLog]       = useState<{msg:string;type:'p1'|'p2'|'sys'}[]>([
     { msg: 'Game starting...', type: 'sys' }
   ]);
 
-  const canvasRef   = useRef<HTMLCanvasElement>(null);
-  const logRef      = useRef<HTMLDivElement>(null);
-  const unsubGame   = useRef<(()=>void)|null>(null);
-  const unsubMatch  = useRef<(()=>void)|null>(null);
-  const timerRef    = useRef<ReturnType<typeof setInterval>|null>(null);
-  const mmTimerRef  = useRef<ReturnType<typeof setInterval>|null>(null);
-  const settledRef  = useRef(false);
-  const gameIdRef   = useRef<string>('');
+  const canvasRef      = useRef<HTMLCanvasElement>(null);
+  const logRef         = useRef<HTMLDivElement>(null);
+  const unsubGame      = useRef<(()=>void)|null>(null);
+  const unsubMatch     = useRef<(()=>void)|null>(null);
+  const timerRef       = useRef<ReturnType<typeof setInterval>|null>(null);
+  const mmTimerRef     = useRef<ReturnType<typeof setInterval>|null>(null);
+  const cancelTimerRef = useRef<ReturnType<typeof setTimeout>|null>(null); // FIX 6
+  const settledRef     = useRef(false);
+  const gameIdRef      = useRef<string>('');
+  const uiPhaseRef     = useRef<UIPhase>('lobby'); // FIX 1: track phase in ref
+  const myRoleRef      = useRef<'player1'|'player2'>('player1');
 
-  // Redraw board on game state change
+  // Keep refs in sync
+  useEffect(() => { uiPhaseRef.current = uiPhase; }, [uiPhase]);
+  useEffect(() => { myRoleRef.current = myRole; }, [myRole]);
+
   useEffect(() => {
     if (gameDoc && canvasRef.current) drawBoard(canvasRef.current, gameDoc);
   }, [gameDoc]);
 
-  // Scroll log
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [log]);
 
   // Cleanup on unmount
   useEffect(() => () => {
-    unsubGame.current?.(); unsubMatch.current?.();
-    if (timerRef.current) clearInterval(timerRef.current);
-    if (mmTimerRef.current) clearInterval(mmTimerRef.current);
+    unsubGame.current?.();
+    unsubMatch.current?.();
+    if (timerRef.current)       clearInterval(timerRef.current);
+    if (mmTimerRef.current)     clearInterval(mmTimerRef.current);
+    if (cancelTimerRef.current) clearTimeout(cancelTimerRef.current); // FIX 6
   }, []);
 
   const addLog = (msg: string, type: 'p1'|'p2'|'sys' = 'sys') =>
     setLog(prev => [...prev.slice(-24), { msg, type }]);
 
-  // Handle game finish
-  const handleGameFinish = useCallback(
-  async (g: LudoGameDoc) => {
-
+  const handleGameFinish = useCallback(async (g: LudoGameDoc) => {
     if (settledRef.current) return;
-
     settledRef.current = true;
 
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-    }
+    if (timerRef.current) clearInterval(timerRef.current);
 
     try {
-
-      // SETTLE PRIZE
       await settlePrize(g);
-
-      // WAIT FIRESTORE SYNC
-      await new Promise((resolve) =>
-        setTimeout(resolve, 1500)
-      );
-
-      // REFRESH PROFILE
+      await new Promise(resolve => setTimeout(resolve, 1500));
       await refreshProfile();
 
-      // RESULT STATUS
-      const isWinner =
-        g.winnerId === uid;
+      const isWinner = g.winnerId === uid;
+      const isDraw   = g.winnerId === null;
 
-      const isDraw =
-        g.winnerId === null;
+      if (isDraw)          toast.success('Match Draw!');
+      else if (isWinner)   toast.success(`🏆 ₹${g.prizePool} added to wallet!`);
+      else                 toast.error('You lost the match');
 
-      // TOAST
-      if (isDraw) {
-
-        toast.success(
-          'Match Draw!'
-        );
-
-      } else if (isWinner) {
-
-        toast.success(
-          `🏆 ₹${g.prizePool} added to wallet!`
-        );
-
-      } else {
-
-        toast.error(
-          'You lost the match'
-        );
-      }
-
-      // OPEN GAME OVER SCREEN
       setUiPhase('game_over');
-
     } catch (e: any) {
-
-      console.error(
-        'Prize settle error:',
-        e
-      );
-
-      toast.error(
-        e?.message ||
-        'Prize settlement failed'
-      );
-
+      console.error('Prize settle error:', e);
+      toast.error(e?.message || 'Prize settlement failed');
       settledRef.current = false;
     }
-  },
-  [refreshProfile, uid,]
-);
+  }, [refreshProfile, uid]);
 
-  // Start game listener
-  const startGameListener = useCallback((gid: string) => {
+  const startGameListener = useCallback((gid: string, role: 'player1'|'player2') => {
     gameIdRef.current = gid;
     unsubGame.current = listenToGame(gid, (g) => {
       setGameDoc(g);
-
       if (g.status === 'finished' && !settledRef.current) {
         handleGameFinish(g);
-        return;
       }
-
-      // Only one client (player1) drives the timer to avoid double-tick
-      // We check if it's our turn OR we are player1 to tick
     });
 
-    // Timer: tick every second — both clients call tickTimer (Firestore tx makes it safe)
+    // FIX 5: Only player1 drives the timer to avoid double Firestore writes
     timerRef.current = setInterval(async () => {
-      try { await tickTimer(gid); } catch {}
+      if (myRoleRef.current === 'player1') {
+        try { await tickTimer(gid); } catch {}
+      }
     }, 1000);
   }, [handleGameFinish]);
 
   // ── Find Match ─────────────────────────────────────────────────────────────
-  const findMatch = async () => {
+  const findMatch = useCallback(async () => {
     if (!uid) return toast.error('Please login first');
     const balance = userProfile?.walletBalance ?? 0;
     if (balance < entryFee) return toast.error(`Insufficient balance! Need ₹${entryFee}`);
 
     setUiPhase('matchmaking');
+    uiPhaseRef.current = 'matchmaking';
     setMmSeconds(0);
     mmTimerRef.current = setInterval(() => setMmSeconds(s => s + 1), 1000);
     addLog('Searching for opponent...', 'sys');
 
+    // Capture entryFee at call time for closure safety (FIX 2)
+    const feeSnapshot = entryFee;
+
     try {
-      const { gameId, role } = await joinMatchmaking(uid, uname, entryFee);
+      const { gameId, role } = await joinMatchmaking(uid, uname, feeSnapshot);
       setMyRole(role);
+      myRoleRef.current = role;
       settledRef.current = false;
 
       if (role === 'player2') {
-        // Game already created — listen directly
         if (mmTimerRef.current) clearInterval(mmTimerRef.current);
         addLog('Opponent found! Game starting...', 'sys');
         toast.success('Opponent found! Game starting!');
-        startGameListener(gameId);
+        startGameListener(gameId, role);
         setUiPhase('in_game');
+        uiPhaseRef.current = 'in_game';
       } else {
-        // We created a placeholder — wait for opponent via listener
         unsubMatch.current = listenForMatch(uid, (gid, foundRole) => {
-          if (mmTimerRef.current) clearInterval(mmTimerRef.current);
+          if (mmTimerRef.current)     clearInterval(mmTimerRef.current);
+          if (cancelTimerRef.current) clearTimeout(cancelTimerRef.current); // FIX 6
           unsubMatch.current?.();
           setMyRole(foundRole);
+          myRoleRef.current = foundRole;
           addLog('Opponent joined! Game starting...', 'sys');
           toast.success('Opponent found! Game starting!');
-          startGameListener(gid);
+          startGameListener(gid, foundRole);
           setUiPhase('in_game');
+          uiPhaseRef.current = 'in_game';
         });
 
-        // Auto-cancel if waiting > 60 seconds
-        setTimeout(async () => {
-          if (uiPhase !== 'matchmaking') return;
+        // FIX 1: Use ref instead of state for phase check; FIX 6: store timeout ref
+        cancelTimerRef.current = setTimeout(async () => {
+          if (uiPhaseRef.current !== 'matchmaking') return; // FIX 1
           unsubMatch.current?.();
           if (mmTimerRef.current) clearInterval(mmTimerRef.current);
-          await cancelMatchmaking(uid, entryFee);
+          await cancelMatchmaking(uid, feeSnapshot); // FIX 2: use captured fee
           toast.error('No opponent found. Entry fee refunded.');
           setUiPhase('lobby');
+          uiPhaseRef.current = 'lobby';
         }, 60_000);
       }
     } catch (err: unknown) {
@@ -341,17 +295,20 @@ export const LudoGame = () => {
       const msg = err instanceof Error ? err.message : 'Something went wrong';
       toast.error(msg);
       setUiPhase('lobby');
+      uiPhaseRef.current = 'lobby';
     }
-  };
+  }, [uid, uname, entryFee, userProfile?.walletBalance, startGameListener]);
 
   const cancelSearch = async () => {
     unsubMatch.current?.();
-    if (mmTimerRef.current) clearInterval(mmTimerRef.current);
+    if (mmTimerRef.current)     clearInterval(mmTimerRef.current);
+    if (cancelTimerRef.current) clearTimeout(cancelTimerRef.current); // FIX 6
     try {
       await cancelMatchmaking(uid, entryFee);
       toast.success('Search cancelled. Entry fee refunded.');
     } catch {}
     setUiPhase('lobby');
+    uiPhaseRef.current = 'lobby';
   };
 
   // ── Roll Dice ──────────────────────────────────────────────────────────────
@@ -380,8 +337,9 @@ export const LudoGame = () => {
         } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : 'Roll failed';
           toast.error(msg);
+        } finally {
+          setRolling(false); // FIX 7: always reset even on error
         }
-        setRolling(false);
       }
     }, 80);
   }, [gameDoc, rolling, uid, myRole]);
@@ -401,18 +359,20 @@ export const LudoGame = () => {
   const prize    = Math.floor(entryFee * 2 * 0.95);
   const isMyTurn = gameDoc?.currentTurn === uid;
   const timerWarn = (gameDoc?.timeLeft ?? 999) <= 30;
+
+  // FIX 4: derive opponent name consistently from gameDoc
   const opponentName = gameDoc
     ? (myRole === 'player1' ? gameDoc.player2?.name : gameDoc.player1.name) ?? 'Opponent'
     : 'Opponent';
 
-  // ── Determine winner info for game over screen ─────────────────────────────
   const getResultInfo = () => {
     if (!gameDoc) return null;
-    const myPlayer   = myRole === 'player1' ? gameDoc.player1 : gameDoc.player2!;
-    const oppPlayer  = myRole === 'player1' ? gameDoc.player2! : gameDoc.player1;
-    const iWon       = gameDoc.winnerId === uid;
-    const isDraw     = gameDoc.winnerId === null;
-    return { myPlayer, oppPlayer, iWon, isDraw, prize: gameDoc.prizePool };
+    const myPlayer  = myRole === 'player1' ? gameDoc.player1 : gameDoc.player2!;
+    const oppPlayer = myRole === 'player1' ? gameDoc.player2! : gameDoc.player1;
+    const iWon      = gameDoc.winnerId === uid;
+    const isDraw    = gameDoc.winnerId === null;
+    // FIX 4: use opponentName (derived above) instead of separate variable
+    return { myPlayer, oppPlayer, iWon, isDraw, prize: gameDoc.prizePool, oppName: opponentName };
   };
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -420,7 +380,6 @@ export const LudoGame = () => {
   // ════════════════════════════════════════════════════════════════════════════
   if (uiPhase === 'lobby') return (
     <div className="space-y-4 pb-4 max-w-2xl mx-auto">
-      {/* Header */}
       <div className="flex items-center gap-3">
         <button onClick={() => navigate('/games')} className="p-2 rounded-xl text-white/60 hover:text-white hover:bg-white/5 transition-all">
           <ChevronLeft className="w-5 h-5" />
@@ -435,7 +394,6 @@ export const LudoGame = () => {
         </div>
       </div>
 
-      {/* Hero */}
       <motion.div initial={{ opacity:0,y:-10 }} animate={{ opacity:1,y:0 }}
         className="relative overflow-hidden rounded-3xl p-6 bg-gradient-to-r from-blue-900/40 to-purple-900/30 border border-blue-500/20">
         <div className="absolute right-6 top-1/2 -translate-y-1/2 text-7xl opacity-10 select-none">🎲</div>
@@ -448,7 +406,6 @@ export const LudoGame = () => {
         </div>
       </motion.div>
 
-      {/* Entry fee selector */}
       <div className="glass rounded-2xl p-5 border border-white/8 space-y-4">
         <h3 className="font-semibold text-white text-sm">Select Entry Fee</h3>
         <div className="grid grid-cols-3 gap-2.5">
@@ -464,7 +421,6 @@ export const LudoGame = () => {
           ))}
         </div>
 
-        {/* Prize breakdown */}
         <div className="p-4 rounded-xl bg-green-500/10 border border-green-500/20 space-y-2">
           <div className="flex justify-between text-sm">
             <span className="text-white/60">Entry Fee</span>
@@ -492,7 +448,6 @@ export const LudoGame = () => {
         </GlowButton>
       </div>
 
-      {/* How to win */}
       <div className="glass rounded-2xl p-4 border border-white/8">
         <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
           <Shield className="w-4 h-4 text-green-400" /> How to Win
@@ -546,7 +501,7 @@ export const LudoGame = () => {
   if (uiPhase === 'game_over') {
     const result = getResultInfo();
     if (!result) return null;
-    const { myPlayer, oppPlayer, iWon, isDraw } = result;
+    const { myPlayer, oppPlayer, iWon, isDraw, oppName } = result; // FIX 4
 
     return (
       <div className="max-w-md mx-auto py-10 px-4 text-center space-y-6">
@@ -564,8 +519,8 @@ export const LudoGame = () => {
 
         <div className="grid grid-cols-2 gap-3">
           {[
-            { p: myPlayer, label: 'You', isWinner: iWon || (isDraw), borderClass: 'border-purple-500/40' },
-            { p: oppPlayer, label: opponentName, isWinner: !iWon && !isDraw, borderClass: 'border-white/10' },
+            { p: myPlayer,  label: 'You',     isWinner: iWon,          borderClass: 'border-purple-500/40' },
+            { p: oppPlayer, label: oppName,    isWinner: !iWon && !isDraw, borderClass: 'border-white/10' }, // FIX 4
           ].map(({ p, label, isWinner, borderClass }) => (
             <div key={label} className={`glass rounded-2xl p-5 border-2 ${isWinner && !isDraw ? 'border-yellow-500/50' : borderClass}`}>
               {isWinner && !isDraw && <div className="text-xs text-yellow-400 font-bold tracking-widest mb-2">👑 WINNER</div>}
@@ -577,10 +532,17 @@ export const LudoGame = () => {
         </div>
 
         <div className="flex gap-3 justify-center">
-          <GlowButton variant="ghost" onClick={() => { setGameDoc(null); setUiPhase('lobby'); }}>
+          <GlowButton variant="ghost" onClick={() => { setGameDoc(null); setUiPhase('lobby'); uiPhaseRef.current = 'lobby'; }}>
             Back to Lobby
           </GlowButton>
-          <GlowButton onClick={() => { setGameDoc(null); settledRef.current = false; setUiPhase('lobby'); setTimeout(findMatch, 100); }}>
+          {/* FIX 3: Reset state fully before calling findMatch */}
+          <GlowButton onClick={() => {
+            setGameDoc(null);
+            settledRef.current = false;
+            setUiPhase('lobby');
+            uiPhaseRef.current = 'lobby';
+            setTimeout(findMatch, 150);
+          }}>
             <Trophy className="w-4 h-4" /> Play Again
           </GlowButton>
         </div>
@@ -605,7 +567,6 @@ export const LudoGame = () => {
 
   return (
     <div className="space-y-3 pb-4 max-w-4xl mx-auto">
-      {/* Header */}
       <div className="flex items-center gap-3">
         <button onClick={() => navigate('/games')} className="p-2 rounded-xl text-white/60 hover:text-white hover:bg-white/5 transition-all">
           <ChevronLeft className="w-5 h-5" />
@@ -617,7 +578,6 @@ export const LudoGame = () => {
           </p>
         </div>
 
-        {/* Timer */}
         <div className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-xl border font-mono font-bold text-lg transition-all ${
           timerWarn ? 'bg-red-900/30 border-red-500/50 text-red-400 animate-pulse'
                     : 'bg-yellow-900/10 border-yellow-700/25 text-yellow-400'
@@ -627,7 +587,6 @@ export const LudoGame = () => {
         </div>
       </div>
 
-      {/* Score bar */}
       <div className="grid grid-cols-2 gap-2">
         {[
           { p: myPlayer,  label: 'You',         isActive: isMyTurn,  col:'#FF7675', border: isMyTurn  ? 'border-red-500'  : 'border-red-900/30'  },
@@ -647,10 +606,7 @@ export const LudoGame = () => {
         ))}
       </div>
 
-      {/* Board + controls */}
       <div className="grid lg:grid-cols-3 gap-3">
-
-        {/* Board */}
         <div className="lg:col-span-2 glass rounded-2xl p-4 border border-white/8">
           <canvas
             ref={canvasRef}
@@ -660,10 +616,7 @@ export const LudoGame = () => {
           />
         </div>
 
-        {/* Right panel */}
         <div className="space-y-3">
-
-          {/* Dice */}
           <div className="glass rounded-2xl p-4 border border-white/8 text-center space-y-3">
             <p className="text-[9px] tracking-[3px] text-white/30">
               {isMyTurn ? '▶ YOUR TURN' : '⏳ WAIT'}
@@ -693,13 +646,11 @@ export const LudoGame = () => {
             )}
           </div>
 
-          {/* Round */}
           <div className="glass rounded-xl px-4 py-2.5 border border-white/5 flex justify-between items-center">
             <span className="text-[9px] tracking-widest text-white/25">ROUND</span>
             <span className="font-bold text-yellow-500/80">{gameDoc.player1.rolls + (gameDoc.player2?.rolls ?? 0)}</span>
           </div>
 
-          {/* Log */}
           <div ref={logRef} className="glass rounded-xl p-3 border border-white/5 overflow-y-auto space-y-1" style={{ maxHeight: 120 }}>
             <AnimatePresence>
               {log.map((entry, i) => (
@@ -720,7 +671,6 @@ export const LudoGame = () => {
             </AnimatePresence>
           </div>
 
-          {/* Forfeit */}
           <button onClick={doForfeit}
             className="w-full py-2 rounded-xl text-[11px] tracking-widest text-red-400/40 border border-red-900/20 hover:border-red-500/30 hover:text-red-400/60 transition-all font-semibold">
             FORFEIT MATCH
