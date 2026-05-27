@@ -10,6 +10,9 @@ import { WithdrawPage } from './pages/WithdrawPage';
 import { TransactionsPage } from './pages/TransactionsPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { ReferralPage } from './pages/ReferralPage';
+import { useAuth } from './hooks/useAuth';
+
+
 
 export default function App() {
   return (
