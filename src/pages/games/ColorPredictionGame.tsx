@@ -733,12 +733,327 @@ export const ColorPredictionGame = () => {
       }
     };
 
-  const progressPercent =
+const progressPercent =
+  (
     (
-      (
-        ROUND_DURATION -
-        timer
-      ) /
-      ROUND_DURATION
-    ) *
-    100;
+      ROUND_DURATION -
+      timer
+    ) /
+    ROUND_DURATION
+  ) *
+  100;
+
+return (
+
+  <div className="min-h-screen bg-[#0a0a0f] text-white p-4">
+
+    {/* HEADER */}
+    <div className="flex items-center justify-between mb-6">
+
+      <button
+        onClick={() => navigate(-1)}
+        className="p-2 rounded-xl bg-white/5 border border-white/10"
+      >
+        <ChevronLeft size={22} />
+      </button>
+
+      <div className="text-center">
+
+        <h1 className="text-2xl font-bold">
+          Color Prediction
+        </h1>
+
+        <p className="text-white/50 text-sm">
+          Round #{roundNumber}
+        </p>
+      </div>
+
+      <div className="text-right">
+
+        <p className="text-xs text-white/50">
+          Balance
+        </p>
+
+        <p className="font-bold text-green-400">
+          ₹{balance.toFixed(2)}
+        </p>
+      </div>
+    </div>
+
+    {/* TIMER */}
+    <div className="mb-6">
+
+      <div className="flex items-center justify-between mb-2">
+
+        <div className="flex items-center gap-2 text-sm text-white/60">
+
+          <Clock size={16} />
+
+          <span>
+            {
+              phase === 'betting'
+                ? 'Betting Time'
+                : phase === 'waiting'
+                ? 'Waiting Result'
+                : 'Result'
+            }
+          </span>
+        </div>
+
+        <span className="font-bold text-lg">
+          {timer}s
+        </span>
+      </div>
+
+      <div className="w-full h-3 rounded-full bg-white/10 overflow-hidden">
+
+        <div
+          className="h-full bg-gradient-to-r from-cyan-500 to-violet-500 transition-all duration-1000"
+          style={{
+            width: `${progressPercent}%`,
+          }}
+        />
+      </div>
+    </div>
+
+    {/* COLORS */}
+    <div className="grid grid-cols-3 gap-4 mb-6">
+
+      {(Object.keys(
+        colorConfig
+      ) as ColorChoice[]).map(
+        (color) => {
+
+          const cfg =
+            colorConfig[color];
+
+          return (
+
+            <motion.button
+              key={color}
+              whileTap={{
+                scale: 0.95,
+              }}
+              onClick={() =>
+                setSelectedColor(
+                  color
+                )
+              }
+              className={`
+                p-5 rounded-3xl border
+                ${cfg.border}
+                ${cfg.bg}
+                ${
+                  selectedColor ===
+                  color
+                    ? 'ring-4 ring-white/50 scale-105'
+                    : ''
+                }
+              `}
+            >
+
+              <div className="text-4xl mb-2">
+                {cfg.emoji}
+              </div>
+
+              <div className="font-bold text-lg">
+                {cfg.label}
+              </div>
+
+              <div className="text-sm opacity-80">
+                {cfg.multiplier}
+              </div>
+            </motion.button>
+          );
+        }
+      )}
+    </div>
+
+    {/* BET INPUT */}
+    <div className="mb-6">
+
+      <input
+        type="number"
+        min={10}
+        value={betAmount}
+        onChange={(e) =>
+          setBetAmount(
+            Number(
+              e.target.value
+            )
+          )
+        }
+        className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-4 outline-none"
+        placeholder="Enter Bet Amount"
+      />
+    </div>
+
+    {/* BET BUTTON */}
+    <GlowButton
+      onClick={placeBet}
+      className="w-full mb-6"
+    >
+      Place Bet
+    </GlowButton>
+
+    {/* CURRENT BET */}
+    {currentBet && (
+
+      <div className="mb-6 p-4 rounded-2xl bg-white/5 border border-white/10">
+
+        <p className="text-sm text-white/50 mb-1">
+          Current Bet
+        </p>
+
+        <div className="flex items-center justify-between">
+
+          <span className="font-bold">
+
+            {
+              colorConfig[
+                currentBet.color
+              ].label
+            }
+          </span>
+
+          <span className="text-green-400 font-bold">
+            ₹{currentBet.amount}
+          </span>
+        </div>
+      </div>
+    )}
+
+    {/* RESULT */}
+    <AnimatePresence>
+
+      {result && (
+
+        <motion.div
+          initial={{
+            scale: 0.5,
+            opacity: 0,
+          }}
+          animate={{
+            scale: 1,
+            opacity: 1,
+          }}
+          exit={{
+            scale: 0.5,
+            opacity: 0,
+          }}
+          className="mb-6 text-center"
+        >
+
+          <div
+            className={`
+              inline-flex items-center justify-center
+              w-32 h-32 rounded-full
+              ${colorConfig[result].bg}
+            `}
+          >
+
+            <span className="text-6xl">
+              {colorConfig[result].emoji}
+            </span>
+          </div>
+
+          <h2 className="text-3xl font-bold mt-4">
+            {colorConfig[result].label}
+          </h2>
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    {/* ROUND HISTORY */}
+    <div className="space-y-3">
+
+      <div className="flex items-center gap-2 mb-3">
+
+        <TrendingUp size={18} />
+
+        <h3 className="font-bold">
+          Recent Results
+        </h3>
+      </div>
+
+      <div className="flex gap-2 flex-wrap">
+
+        {roundHistory
+          .slice(0, 10)
+          .map((r, i) => (
+
+            <div
+              key={i}
+              className={`
+                w-10 h-10 rounded-full
+                flex items-center justify-center text-lg
+                ${
+                  colorConfig[
+                    r.result as ColorChoice
+                  ]?.bg
+                }
+              `}
+            >
+
+              {
+                colorConfig[
+                  r.result as ColorChoice
+                ]?.emoji
+              }
+            </div>
+          ))}
+      </div>
+    </div>
+
+    {/* LIVE USERS */}
+    <div className="mt-8 flex items-center justify-center gap-2 text-white/50 text-sm">
+
+      <Users size={16} />
+
+      <span>
+        {liveUsers.toLocaleString()} users online
+      </span>
+    </div>
+
+    {/* WIN POPUP */}
+    <AnimatePresence>
+
+      {showWinAnim && (
+
+        <motion.div
+          initial={{
+            opacity: 0,
+            scale: 0.5,
+          }}
+          animate={{
+            opacity: 1,
+            scale: 1,
+          }}
+          exit={{
+            opacity: 0,
+            scale: 0.5,
+          }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+        >
+
+          <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-3xl p-10 text-center shadow-2xl">
+
+            <Zap
+              size={60}
+              className="mx-auto mb-4"
+            />
+
+            <h2 className="text-4xl font-black mb-2">
+              YOU WON!
+            </h2>
+
+            <p className="text-lg">
+              Congratulations 🎉
+            </p>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  </div>
+);
+};
