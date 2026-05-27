@@ -78,7 +78,7 @@ export async function creditWallet(uid: string, amount: number, gameId: string, 
     if (!snap.exists()) throw new Error('User not found');
     const balance: number = snap.data().walletBalance ?? 0;
 
-    tx.update(userRef, { walletBalance: balance + amount });
+    tx.update(userRef, { walletBalance: Number(balance) + Number(amount) });
     tx.set(txRef, {
   userId: uid,
   amount,
@@ -88,7 +88,7 @@ export async function creditWallet(uid: string, amount: number, gameId: string, 
     type === 'game_win'
       ? `Ludo prize ₹${amount}`
       : `Ludo refund ₹${amount}`,
-  createdAt: serverTimestamp(),
+  createdAt: Timestamp.now(),
 });
   });
 }
