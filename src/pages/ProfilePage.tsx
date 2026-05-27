@@ -3,6 +3,7 @@
 // ============================================================
 
 import { useState } from 'react';
+import { StatCard, GlowButton } from '../components';
 import { motion } from 'framer-motion';
 import { User, Camera, Save, Shield } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
