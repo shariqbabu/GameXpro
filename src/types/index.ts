@@ -135,19 +135,25 @@ export interface Notification {
 }
 
 export interface AdminSettings {
+  // Bonuses
   signupBonus: number;
   referralBonus: number;
   refereeBonus: number;
+  platformFeePercent: number;
+  // Deposit
   minDeposit: number;
   maxDeposit: number;
+  // Withdrawal
   minWithdrawal: number;
   maxWithdrawal: number;
-  maintenanceMode: boolean;
-  appName: string;
+  // Payment
   upiId: string;
   qrImageUrl: string;
+  appName: string;
+  // Toggles
   colorPredictionActive: boolean;
   ludoActive: boolean;
+  maintenanceMode: boolean;
 }
 
 export interface GameHistory {
