@@ -11,7 +11,7 @@ export const ReferralPage = () => {
   const [copied, setCopied] = useState(false);
 
   const referralCode = userProfile?.referralCode || 'DEMO123';
-  const referralLink = `${import.meta.env.VITE_APP_URL || 'https://royalwin.com'}/signup?ref=${referralCode}`;
+  const referralLink = `${import.meta.env.VITE_APP_URL || 'https://game-xpro-pi.vercel.app'}/signup?ref=${referralCode}`;
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
