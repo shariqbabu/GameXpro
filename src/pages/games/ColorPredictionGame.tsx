@@ -1,6 +1,4 @@
-The error is a **build/syntax error** caused by the code block markers (` ```tsx `) being accidentally included in the file. Let me provide the clean file:
 
-```tsx
 // src/pages/games/ColorPredictionGame.tsx
 
 import { useState, useEffect, useRef } from 'react';
