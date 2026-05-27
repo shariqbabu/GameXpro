@@ -11,7 +11,6 @@ import {
   listenToGame, submitRoll, tickTimer, forfeitGame,
   settlePrize, type LudoGameDoc,
 } from '../../services/ludoService';
-
 const PATH: [number, number][] = [
   [1,6],[2,6],[3,6],[4,6],[5,6],
   [6,5],[6,4],[6,3],[6,2],[6,1],[6,0],
@@ -240,7 +239,14 @@ export const LudoGame = () => {
   // ── Find Match ─────────────────────────────────────────────────────────────
   const findMatch = useCallback(async () => {
     if (!uid) return toast.error('Please login first');
-    const balance = userProfile?.walletBalance ?? 0;
+    // AuthContext ya userProfile jo bhi wallet data fetch karta hai,
+// wahan 'wallets' collection se padhna chahiye
+// Ya phir LudoGame.tsx mein directly:
+const balance = (userProfile?.winningBalance ?? 0)
+              + (userProfile?.depositBalance ?? 0)
+              + (userProfile?.bonusBalance   ?? 0);
+// Ya agar totalBalance field available hai:
+const balance = userProfile?.totalBalance ?? 0;
     if (balance < entryFee) return toast.error(`Insufficient balance! Need ₹${entryFee}`);
 
     setUiPhase('matchmaking');
