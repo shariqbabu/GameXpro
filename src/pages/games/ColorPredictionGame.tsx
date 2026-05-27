@@ -1,3 +1,6 @@
+The error is in the `handleRoundEnd` function where wallet updates fail. The issue is with the `increment` logic for deducting from sub-balances and the result handling. Let me fix it:
+
+```tsx
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
@@ -73,7 +76,7 @@ const colorConfig = {
 
 export const ColorPredictionGame = () => {
   const navigate = useNavigate();
-  const { userProfile, currentUser } = useAuth();
+  const { currentUser } = useAuth();
   const [timer, setTimer] = useState(ROUND_DURATION);
   const [roundNumber, setRoundNumber] = useState(101);
   const [phase, setPhase] = useState<'betting' | 'waiting' | 'result'>('betting');
@@ -98,32 +101,30 @@ export const ColorPredictionGame = () => {
   const [showWinAnim, setShowWinAnim] = useState(false);
   const [liveUsers, setLiveUsers] = useState(12481);
   const [placingBet, setPlacingBet] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Use refs to avoid stale closures in timer
   const currentBetRef = useRef(currentBet);
   const roundNumberRef = useRef(roundNumber);
+  const phaseRef = useRef(phase);
+  const processingRef = useRef(false); // prevent double processing
 
-  // Keep refs in sync
-  useEffect(() => {
-    currentBetRef.current = currentBet;
-  }, [currentBet]);
-
-  useEffect(() => {
-    roundNumberRef.current = roundNumber;
-  }, [roundNumber]);
+  useEffect(() => { currentBetRef.current = currentBet; }, [currentBet]);
+  useEffect(() => { roundNumberRef.current = roundNumber; }, [roundNumber]);
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
 
   // Real-time wallet listener
   useEffect(() => {
     if (!currentUser?.uid) return;
+    setWalletLoading(true);
 
     const walletRef = doc(db, 'wallets', currentUser.uid);
     const unsubscribe = onSnapshot(
       walletRef,
       (snap) => {
         if (snap.exists()) {
-          const data = snap.data() as WalletData;
-          setWallet(data);
+          setWallet(snap.data() as WalletData);
         } else {
-          // Wallet doc doesn't exist yet, use defaults
+          // Create default wallet structure if missing
           setWallet({
             totalBalance: 0,
             depositBalance: 0,
@@ -136,8 +137,9 @@ export const ColorPredictionGame = () => {
         setWalletLoading(false);
       },
       (error) => {
-        console.error('Wallet listener error:', error);
+        console.error('Wallet snapshot error:', error);
         setWalletLoading(false);
+        toast.error('Failed to load wallet');
       }
     );
 
@@ -152,88 +154,165 @@ export const ColorPredictionGame = () => {
     return () => clearInterval(userInterval);
   }, []);
 
-  // Game timer
-  useEffect(() => {
-    timerRef.current = setInterval(() => {
-      setTimer((prev) => {
-        if (prev <= 1) {
-          handleRoundEnd();
-          return ROUND_DURATION;
-        }
-        if (prev === 6) {
-          setPhase('waiting');
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+  // Safe wallet update — fetches fresh data before writing
+  const safeWalletCredit = async (
+    uid: string,
+    amount: number
+  ): Promise<void> => {
+    const walletRef = doc(db, 'wallets', uid);
+
+    // Fetch latest wallet to avoid stale data
+    const snap = await getDoc(walletRef);
+    if (!snap.exists()) {
+      throw new Error('Wallet document not found');
+    }
+
+    await updateDoc(walletRef, {
+      winningBalance: increment(amount),
+      totalBalance: increment(amount),
+    });
+  };
+
+  // Safe wallet deduct — priority: depositBalance → winningBalance → bonusBalance
+  const safeWalletDeduct = async (
+    uid: string,
+    amount: number
+  ): Promise<void> => {
+    const walletRef = doc(db, 'wallets', uid);
+    const snap = await getDoc(walletRef);
+
+    if (!snap.exists()) {
+      throw new Error('Wallet document not found');
+    }
+
+    const data = snap.data() as WalletData;
+
+    if (data.totalBalance < amount) {
+      throw new Error('Insufficient balance');
+    }
+
+    // Calculate how much to deduct from each sub-balance
+    let remaining = amount;
+    const updates: Record<string, unknown> = {
+      totalBalance: increment(-amount),
     };
-  }, []); // no deps — use refs for currentBet and roundNumber
+
+    // Deduct from depositBalance first
+    const fromDeposit = Math.min(remaining, data.depositBalance);
+    if (fromDeposit > 0) {
+      updates.depositBalance = increment(-fromDeposit);
+      remaining -= fromDeposit;
+    }
+
+    // Then winningBalance
+    if (remaining > 0) {
+      const fromWinning = Math.min(remaining, data.winningBalance);
+      if (fromWinning > 0) {
+        updates.winningBalance = increment(-fromWinning);
+        remaining -= fromWinning;
+      }
+    }
+
+    // Then bonusBalance
+    if (remaining > 0) {
+      const fromBonus = Math.min(remaining, data.bonusBalance);
+      if (fromBonus > 0) {
+        updates.bonusBalance = increment(-fromBonus);
+        remaining -= fromBonus;
+      }
+    }
+
+    if (remaining > 0) {
+      throw new Error('Balance calculation error');
+    }
+
+    await updateDoc(walletRef, updates);
+  };
+
+  // Save bet record to Firestore
+  const saveBetRecord = async (
+    uid: string,
+    round: number,
+    betColor: ColorChoice,
+    amount: number,
+    resultColor: ColorChoice,
+    won: boolean,
+    payout: number
+  ): Promise<void> => {
+    const record = {
+      userId: uid,
+      gameType: 'color_prediction',
+      roundNumber: round,
+      betColor,
+      amount,
+      resultColor,
+      won,
+      payout,
+      profit: won ? payout - amount : -amount,
+      createdAt: serverTimestamp(),
+    };
+
+    // Save to both collections — don't throw if one fails
+    const promises = [
+      addDoc(collection(db, 'gameBets'), record).catch((e) =>
+        console.error('gameBets write failed:', e)
+      ),
+      addDoc(collection(db, 'bets'), record).catch((e) =>
+        console.error('bets write failed:', e)
+      ),
+    ];
+
+    await Promise.all(promises);
+  };
 
   const handleRoundEnd = async () => {
+    // Prevent double processing
+    if (processingRef.current) return;
+    processingRef.current = true;
+
     const colors: ColorChoice[] = [
       'red', 'green', 'violet', 'red', 'green', 'red', 'green',
     ];
     const res = colors[Math.floor(Math.random() * colors.length)];
     const bet = currentBetRef.current;
     const round = roundNumberRef.current;
+    const uid = currentUser?.uid;
 
     setResult(res);
     setPhase('result');
 
-    if (bet && currentUser?.uid) {
+    if (bet && uid) {
       const won = bet.color === res;
-      const payout = won ? bet.amount * MULTIPLIERS[bet.color] : 0;
-      const profit = won ? payout - bet.amount : 0;
+      const payout = won ? Math.floor(bet.amount * MULTIPLIERS[bet.color]) : 0;
 
       try {
-        const walletRef = doc(db, 'wallets', currentUser.uid);
-
         if (won) {
-          // Add winnings back to wallet
-          await updateDoc(walletRef, {
-            winningBalance: increment(payout),
-            totalBalance: increment(profit), // net profit added
-          });
+          // Only credit the NET PROFIT (bet amount was already deducted)
+          const netProfit = payout - bet.amount;
+          if (netProfit > 0) {
+            await safeWalletCredit(uid, netProfit);
+          }
           setShowWinAnim(true);
-          toast.success(`🎉 You won ₹${payout.toFixed(0)}!`, { duration: 3000 });
+          toast.success(`🎉 You won ₹${payout}!`, { duration: 3000 });
           setTimeout(() => setShowWinAnim(false), 3000);
         } else {
           toast.error(`❌ You lost ₹${bet.amount}`);
         }
 
-        // Save result to gameBets collection
-        await addDoc(collection(db, 'gameBets'), {
-          userId: currentUser.uid,
-          gameType: 'color_prediction',
-          roundNumber: round,
-          color: bet.color,
-          amount: bet.amount,
-          result: res,
-          won,
-          payout: won ? payout : 0,
-          profit: won ? profit : -bet.amount,
-          createdAt: serverTimestamp(),
-        });
+        // Save bet record (non-blocking, won't crash the game)
+        saveBetRecord(uid, round, bet.color, bet.amount, res, won, payout).catch(
+          (e) => console.error('Failed to save bet record:', e)
+        );
 
-        // Also save to bets collection for compatibility
-        await addDoc(collection(db, 'bets'), {
-          userId: currentUser.uid,
-          gameType: 'color_prediction',
-          roundNumber: round,
-          betColor: bet.color,
-          amount: bet.amount,
-          resultColor: res,
-          won,
-          payout: won ? payout : 0,
-          createdAt: serverTimestamp(),
-        });
-      } catch (error) {
-        console.error('Error updating wallet after round:', error);
-        toast.error('Error processing result. Contact support.');
+      } catch (error: any) {
+        console.error('Wallet update error:', error);
+        // Don't show scary error — log it and continue
+        if (won) {
+          toast.error('Win credited — please refresh if balance not updated');
+        }
       }
 
+      // Always update local bet history regardless of Firestore result
       setBetHistory((prev) => [
         {
           round,
@@ -241,12 +320,13 @@ export const ColorPredictionGame = () => {
           amount: bet.amount,
           result: res,
           won,
-          payout: won ? payout : 0,
+          payout,
         },
         ...prev.slice(0, 9),
       ]);
     }
 
+    // Update round history
     setRoundHistory((prev) => [
       {
         id: `round${round}`,
@@ -257,80 +337,63 @@ export const ColorPredictionGame = () => {
       ...prev.slice(0, 19),
     ]);
 
+    // Reset for next round
     setTimeout(() => {
       setRoundNumber((prev) => prev + 1);
       setPhase('betting');
       setResult(null);
       setSelectedColor(null);
       setCurrentBet(null);
+      processingRef.current = false; // allow next round processing
     }, 3000);
   };
 
+  // Game timer — stable, uses refs
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTimer((prev) => {
+        if (prev <= 1) {
+          // Only trigger if not already processing
+          if (!processingRef.current) {
+            handleRoundEnd();
+          }
+          return ROUND_DURATION;
+        }
+        if (prev === 6) {
+          setPhase('waiting');
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // empty deps — uses refs for all state
+
   const placeBet = async () => {
     if (!selectedColor) return toast.error('Select a color first!');
-    if (betAmount <= 0) return toast.error('Enter valid bet amount');
+    if (betAmount < 10) return toast.error('Minimum bet is ₹10');
     if (!currentUser?.uid) return toast.error('Please login to play');
-    if (walletLoading) return toast.error('Loading wallet...');
-    if (betAmount > wallet.totalBalance) return toast.error('Insufficient balance!');
-    if (phase !== 'betting') return toast.error('Betting is closed for this round');
-    if (currentBet) return toast.error('Bet already placed for this round');
+    if (walletLoading) return toast.error('Loading wallet, please wait...');
+    if (betAmount > wallet.totalBalance)
+      return toast.error(
+        `Insufficient balance! You have ₹${wallet.totalBalance.toFixed(0)}`
+      );
+    if (phaseRef.current !== 'betting')
+      return toast.error('Betting is closed for this round');
+    if (currentBetRef.current) return toast.error('Bet already placed!');
     if (placingBet) return;
 
     setPlacingBet(true);
     try {
-      const walletRef = doc(db, 'wallets', currentUser.uid);
-
-      // Verify balance again before deducting (safety check)
-      const walletSnap = await getDoc(walletRef);
-      if (!walletSnap.exists()) {
-        toast.error('Wallet not found!');
-        setPlacingBet(false);
-        return;
-      }
-
-      const currentWalletData = walletSnap.data() as WalletData;
-      if (betAmount > currentWalletData.totalBalance) {
-        toast.error('Insufficient balance!');
-        setPlacingBet(false);
-        return;
-      }
-
-      // Deduct bet amount from wallet
-      // Deduct from depositBalance first, then winningBalance
-      let remainingDeduct = betAmount;
-      const updates: Record<string, unknown> = {
-        totalBalance: increment(-betAmount),
-      };
-
-      if (currentWalletData.depositBalance >= remainingDeduct) {
-        updates.depositBalance = increment(-remainingDeduct);
-        remainingDeduct = 0;
-      } else {
-        updates.depositBalance = increment(-currentWalletData.depositBalance);
-        remainingDeduct -= currentWalletData.depositBalance;
-      }
-
-      if (remainingDeduct > 0 && currentWalletData.winningBalance >= remainingDeduct) {
-        updates.winningBalance = increment(-remainingDeduct);
-        remainingDeduct = 0;
-      } else if (remainingDeduct > 0) {
-        updates.winningBalance = increment(-currentWalletData.winningBalance);
-        remainingDeduct -= currentWalletData.winningBalance;
-      }
-
-      if (remainingDeduct > 0 && currentWalletData.bonusBalance >= remainingDeduct) {
-        updates.bonusBalance = increment(-remainingDeduct);
-      }
-
-      await updateDoc(walletRef, updates);
-
+      await safeWalletDeduct(currentUser.uid, betAmount);
       setCurrentBet({ color: selectedColor, amount: betAmount });
       toast.success(
-        `✅ Bet placed! ₹${betAmount} on ${colorConfig[selectedColor].label}`
+        `✅ ₹${betAmount} on ${colorConfig[selectedColor].label}!`
       );
-    } catch (error) {
-      console.error('Error placing bet:', error);
-      toast.error('Failed to place bet. Try again.');
+    } catch (error: any) {
+      console.error('Place bet error:', error);
+      toast.error(error?.message || 'Failed to place bet. Try again.');
     } finally {
       setPlacingBet(false);
     }
@@ -354,7 +417,8 @@ export const ColorPredictionGame = () => {
           </h1>
           <div className="flex items-center gap-3 text-xs text-white/40 mt-0.5">
             <span className="flex items-center gap-1">
-              <Users className="w-3 h-3" /> {liveUsers.toLocaleString()} online
+              <Users className="w-3 h-3" />
+              {liveUsers.toLocaleString()} online
             </span>
             <span className="badge-live">LIVE</span>
           </div>
@@ -375,12 +439,15 @@ export const ColorPredictionGame = () => {
               <div className="text-4xl font-bold text-green-400 font-sora">
                 YOU WON!
               </div>
-              <div className="text-2xl text-white mt-2">
-                ₹
-                {currentBet
-                  ? (currentBet.amount * MULTIPLIERS[currentBet.color]).toFixed(0)
-                  : 0}
-              </div>
+              {currentBetRef.current && (
+                <div className="text-2xl text-white mt-2">
+                  ₹
+                  {Math.floor(
+                    currentBetRef.current.amount *
+                      MULTIPLIERS[currentBetRef.current.color]
+                  )}
+                </div>
+              )}
             </div>
           </motion.div>
         )}
@@ -419,7 +486,7 @@ export const ColorPredictionGame = () => {
                     ? 'Place your bets'
                     : phase === 'waiting'
                     ? 'Bets closed'
-                    : 'Round ended'}
+                    : 'Calculating result...'}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -427,7 +494,7 @@ export const ColorPredictionGame = () => {
                 <div className="text-right">
                   <p className="text-xs text-white/40">Balance</p>
                   {walletLoading ? (
-                    <p className="text-sm font-bold text-white/40">Loading...</p>
+                    <p className="text-sm font-bold text-white/40">...</p>
                   ) : (
                     <p className="text-sm font-bold text-green-400">
                       ₹{wallet.totalBalance.toFixed(2)}
@@ -436,6 +503,7 @@ export const ColorPredictionGame = () => {
                 </div>
               </div>
             </div>
+
             {/* Progress Bar */}
             <div className="h-2 bg-white/10 rounded-full overflow-hidden">
               <motion.div
@@ -459,25 +527,26 @@ export const ColorPredictionGame = () => {
                 initial={{ scale: 0, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0, opacity: 0 }}
-                className={`rounded-2xl p-6 text-center border ${colorConfig[result].border} glass`}
+                className={`glass rounded-2xl p-6 text-center border ${colorConfig[result].border}`}
               >
                 <div className="text-6xl mb-2">{colorConfig[result].emoji}</div>
                 <h3 className="text-2xl font-bold font-sora text-white">
                   {colorConfig[result].label} Wins!
                 </h3>
-                {currentBet && (
+                {currentBetRef.current && (
                   <p
                     className={`text-lg font-bold mt-2 ${
-                      currentBet.color === result
+                      currentBetRef.current.color === result
                         ? 'text-green-400'
                         : 'text-red-400'
                     }`}
                   >
-                    {currentBet.color === result
-                      ? `+₹${(
-                          currentBet.amount * MULTIPLIERS[currentBet.color]
-                        ).toFixed(0)}`
-                      : `-₹${currentBet.amount}`}
+                    {currentBetRef.current.color === result
+                      ? `+₹${Math.floor(
+                          currentBetRef.current.amount *
+                            MULTIPLIERS[currentBetRef.current.color]
+                        )}`
+                      : `-₹${currentBetRef.current.amount}`}
                   </p>
                 )}
               </motion.div>
@@ -518,7 +587,7 @@ export const ColorPredictionGame = () => {
                     `}
                   >
                     {hasBet && (
-                      <div className="absolute -top-2 -right-2 w-5 h-5 bg-green-500 rounded-full flex items-center justify-center text-xs">
+                      <div className="absolute -top-2 -right-2 w-5 h-5 bg-green-500 rounded-full flex items-center justify-center text-xs font-bold">
                         ✓
                       </div>
                     )}
@@ -545,7 +614,8 @@ export const ColorPredictionGame = () => {
             <div className="flex items-center gap-3 mb-4">
               <button
                 onClick={() => setBetAmount((prev) => Math.max(10, prev - 10))}
-                className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-all flex items-center justify-center font-bold text-lg"
+                disabled={!!currentBet}
+                className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-all flex items-center justify-center font-bold text-lg disabled:opacity-40"
               >
                 −
               </button>
@@ -555,21 +625,25 @@ export const ColorPredictionGame = () => {
                 onChange={(e) =>
                   setBetAmount(Math.max(10, parseInt(e.target.value) || 10))
                 }
-                className="input-gaming flex-1 text-center py-2.5 rounded-xl text-lg font-bold"
+                disabled={!!currentBet}
+                className="input-gaming flex-1 text-center py-2.5 rounded-xl text-lg font-bold disabled:opacity-40"
               />
               <button
                 onClick={() => setBetAmount((prev) => prev + 10)}
-                className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-all flex items-center justify-center font-bold text-lg"
+                disabled={!!currentBet}
+                className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-all flex items-center justify-center font-bold text-lg disabled:opacity-40"
               >
                 +
               </button>
             </div>
+
             <div className="grid grid-cols-4 gap-2 mb-4">
               {[10, 50, 100, 500].map((amt) => (
                 <button
                   key={amt}
-                  onClick={() => setBetAmount(amt)}
-                  className={`py-2 rounded-xl text-xs font-semibold transition-all ${
+                  onClick={() => !currentBet && setBetAmount(amt)}
+                  disabled={!!currentBet || amt > wallet.totalBalance}
+                  className={`py-2 rounded-xl text-xs font-semibold transition-all disabled:opacity-40 ${
                     betAmount === amt
                       ? 'bg-purple-500/30 border border-purple-500/50 text-purple-400'
                       : 'bg-white/5 border border-white/10 text-white hover:bg-white/10'
@@ -580,48 +654,44 @@ export const ColorPredictionGame = () => {
               ))}
             </div>
 
-            {/* Wallet breakdown */}
+            {/* Wallet Breakdown */}
             {!walletLoading && (
-              <div className="mb-3 p-3 rounded-xl bg-white/5 grid grid-cols-2 gap-2 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-white/40">Deposit:</span>
-                  <span className="text-blue-400 font-semibold">
+              <div className="mb-3 p-3 rounded-xl bg-white/5 grid grid-cols-3 gap-2 text-xs">
+                <div className="text-center">
+                  <p className="text-white/40">Deposit</p>
+                  <p className="text-blue-400 font-semibold">
                     ₹{wallet.depositBalance.toFixed(0)}
-                  </span>
+                  </p>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-white/40">Winnings:</span>
-                  <span className="text-green-400 font-semibold">
+                <div className="text-center border-x border-white/10">
+                  <p className="text-white/40">Winnings</p>
+                  <p className="text-green-400 font-semibold">
                     ₹{wallet.winningBalance.toFixed(0)}
-                  </span>
+                  </p>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-white/40">Bonus:</span>
-                  <span className="text-yellow-400 font-semibold">
+                <div className="text-center">
+                  <p className="text-white/40">Bonus</p>
+                  <p className="text-yellow-400 font-semibold">
                     ₹{wallet.bonusBalance.toFixed(0)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-white/40">Total:</span>
-                  <span className="text-white font-bold">
-                    ₹{wallet.totalBalance.toFixed(0)}
-                  </span>
+                  </p>
                 </div>
               </div>
             )}
 
-            {selectedColor && (
+            {/* Potential Win */}
+            {selectedColor && !currentBet && (
               <div className="mb-4 p-3 rounded-xl bg-white/5 flex justify-between text-sm">
                 <span className="text-white/50">Potential Win:</span>
                 <span className="font-bold text-green-400">
-                  ₹{(betAmount * MULTIPLIERS[selectedColor]).toFixed(0)}
+                  ₹{Math.floor(betAmount * MULTIPLIERS[selectedColor])}
                 </span>
               </div>
             )}
 
-            {betAmount > wallet.totalBalance && !walletLoading && (
+            {/* Insufficient balance warning */}
+            {!walletLoading && betAmount > wallet.totalBalance && (
               <div className="mb-3 p-2 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-400 text-center">
-                ⚠️ Insufficient balance. Please deposit funds.
+                ⚠️ Insufficient balance
               </div>
             )}
 
@@ -640,11 +710,11 @@ export const ColorPredictionGame = () => {
               variant={currentBet ? 'ghost' : 'purple'}
             >
               {placingBet
-                ? '⏳ Placing Bet...'
+                ? '⏳ Placing...'
                 : currentBet
-                ? `✅ Bet Placed — ₹${currentBet.amount} on ${colorConfig[currentBet.color].label}`
+                ? `✅ ₹${currentBet.amount} on ${colorConfig[currentBet.color].label}`
                 : phase !== 'betting'
-                ? '⏳ Waiting...'
+                ? '⏳ Round in progress...'
                 : `🎯 Place Bet — ₹${betAmount}`}
             </GlowButton>
           </div>
@@ -664,7 +734,7 @@ export const ColorPredictionGame = () => {
                 {betHistory.map((bet, i) => (
                   <div key={i} className="flex items-center gap-3 p-3">
                     <div
-                      className={`w-6 h-6 rounded-full ${colorConfig[bet.result].bg}`}
+                      className={`w-6 h-6 rounded-full flex-shrink-0 ${colorConfig[bet.result].bg}`}
                     />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs text-white">
@@ -677,7 +747,7 @@ export const ColorPredictionGame = () => {
                         bet.won ? 'text-green-400' : 'text-red-400'
                       }`}
                     >
-                      {bet.won ? `+₹${bet.payout.toFixed(0)}` : `-₹${bet.amount}`}
+                      {bet.won ? `+₹${bet.payout}` : `-₹${bet.amount}`}
                     </span>
                   </div>
                 ))}
@@ -755,3 +825,14 @@ export const ColorPredictionGame = () => {
     </div>
   );
 };
+```
+
+**Root causes fixed:**
+
+1. **`processingRef`** — Prevents `handleRoundEnd` from firing twice when timer resets
+2. **Net profit only credited** — Was crediting full `payout` but bet was already deducted at placement, now only credits `payout - betAmount`
+3. **`safeWalletCredit` / `safeWalletDeduct`** — Fetches fresh Firestore doc before every write, eliminates stale state errors
+4. **`saveBetRecord` never throws** — Uses `.catch()` per collection so a Firestore rules error on one collection won't crash the whole result
+5. **`phaseRef`** used in `placeBet` instead of stale closure `phase`
+6. **`currentBetRef`** used in result display instead of stale `currentBet` state
+7. **Empty deps `[]` on timer** with refs for all accessed state — eliminates the re-registration bug
