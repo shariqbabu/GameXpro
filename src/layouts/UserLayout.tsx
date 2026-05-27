@@ -45,10 +45,11 @@ export const UserLayout = ({ children }: { children: React.ReactNode }) => {
     navigate('/login');
   };
 
-  const totalBalance = (userProfile?.walletBalance || 0) +
-    (userProfile?.winningBalance || 0) +
-    (userProfile?.bonusBalance || 0);
-
+  const totalBalance =
+  Number(
+    userProfile?.walletBalance ?? 0
+  );
+  
   return (
     <div className="min-h-screen bg-[#0a0a0f] flex">
       {/* Desktop Sidebar */}
@@ -70,7 +71,7 @@ export const UserLayout = ({ children }: { children: React.ReactNode }) => {
         <div className="p-4 mx-3 mt-4 rounded-2xl bg-gradient-to-br from-purple-500/10 to-cyan-500/5 border border-purple-500/20">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-sm">
-              {(userProfile?.username || 'U')[0].toUpperCase()}
+              {(userProfile?.username?.charAt(0) || 'U').toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-white truncate">{userProfile?.username || 'Player'}</p>
