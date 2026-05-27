@@ -386,11 +386,11 @@ export const ColorPredictionGame = () => {
         `Bet placed on ${selectedColor}`
       );
 
-    } catch (error) {
-      console.error(error);
+    } catch (error: any) {
+  console.error('BET ERROR:', error);
 
-      toast.error('Bet failed');
-    }
+  toast.error(error.message || 'Bet failed');
+}
   };
 
   const progressPercent =
