@@ -233,7 +233,7 @@ export const ProfilePage = () => {
           {[
             {
               label: 'Total Balance',
-              value: `₹${totalBalance.toFixed(0)}`,
+              value: `₹${totalBalance}`,
               color: 'text-green-400',
             },
             {
