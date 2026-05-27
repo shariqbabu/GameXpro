@@ -20,6 +20,13 @@ import {
 
 import { useNavigate } from 'react-router-dom';
 
+import {
+  doc,
+  updateDoc,
+} from 'firebase/firestore';
+
+import { db } from '../../firebase/config';
+
 const achievements = [
   {
     id: 'first_win',
@@ -54,103 +61,198 @@ const achievements = [
 ];
 
 export const ProfilePage = () => {
-  const { userProfile, logout } = useAuth();
+
+  const {
+    userProfile,
+    logout,
+    refreshProfile,
+  } = useAuth();
 
   const navigate = useNavigate();
 
-  const [editMode, setEditMode] = useState(false);
+  const [editMode, setEditMode] =
+    useState(false);
 
-  const [username, setUsername] = useState(
-    userProfile?.username ?? ''
-  );
+  const [username, setUsername] =
+    useState(
+      userProfile?.username ?? ''
+    );
 
+  // LOADING
+  if (!userProfile) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="text-white text-lg font-semibold">
+          Loading Profile...
+        </div>
+      </div>
+    );
+  }
+
+  // SAVE PROFILE
   const handleSave = async () => {
-    try {
-      // TODO: FIREBASE UPDATE PROFILE
 
-      toast.success('Profile updated!');
+    if (!userProfile?.uid) {
+      return toast.error(
+        'User not found'
+      );
+    }
+
+    if (!username.trim()) {
+      return toast.error(
+        'Username required'
+      );
+    }
+
+    try {
+
+      await updateDoc(
+        doc(
+          db,
+          'users',
+          userProfile.uid
+        ),
+        {
+          username:
+            username.trim(),
+        }
+      );
+
+      await refreshProfile();
+
+      toast.success(
+        'Profile updated!'
+      );
+
       setEditMode(false);
 
     } catch (error) {
+
       console.error(error);
-      toast.error('Failed to update profile');
+
+      toast.error(
+        'Failed to update profile'
+      );
     }
   };
 
+  // LOGOUT
   const handleLogout = async () => {
+
     try {
+
       await logout();
 
-      toast.success('Logged out');
+      toast.success(
+        'Logged out'
+      );
 
       navigate('/login');
 
     } catch (error) {
+
       console.error(error);
-      toast.error('Logout failed');
+
+      toast.error(
+        'Logout failed'
+      );
     }
   };
 
   const userAchievements =
-    userProfile?.achievements ?? [];
+    Array.isArray(
+      userProfile?.achievements
+    )
+      ? userProfile.achievements
+      : [];
 
+  // FIXED TOTAL BALANCE
   const totalBalance =
-    (userProfile?.walletBalance ?? 0) +
-    (userProfile?.winningBalance ?? 0) +
-    (userProfile?.bonusBalance ?? 0);
+    Number(
+      userProfile?.walletBalance || 0
+    );
 
   return (
     <div className="space-y-5 pb-4 max-w-2xl mx-auto">
+
       {/* PROFILE CARD */}
       <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
+        initial={{
+          opacity: 0,
+          y: -10,
+        }}
+        animate={{
+          opacity: 1,
+          y: 0,
+        }}
         className="relative overflow-hidden rounded-3xl p-6 bg-gradient-to-br from-purple-900/40 via-purple-800/20 to-cyan-900/20 border border-purple-500/20"
       >
+
         <div className="absolute top-0 right-0 w-64 h-64 bg-purple-500/10 rounded-full blur-3xl" />
 
         <div className="flex flex-col sm:flex-row sm:items-start gap-5 relative z-10">
+
           {/* AVATAR */}
           <div className="relative mx-auto sm:mx-0">
+
             <div className="w-24 h-24 rounded-2xl overflow-hidden bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-4xl font-bold text-white shadow-2xl shadow-purple-500/30">
+
               {userProfile?.photoURL ? (
+
                 <img
                   src={userProfile.photoURL}
                   alt="profile"
                   className="w-full h-full object-cover"
                 />
+
               ) : (
-                (userProfile?.username?.[0] ?? 'U').toUpperCase()
+
+                (
+                  userProfile?.username?.[0] ??
+                  'U'
+                ).toUpperCase()
               )}
             </div>
 
             <button className="absolute -bottom-1 -right-1 w-7 h-7 rounded-xl bg-purple-500 flex items-center justify-center hover:bg-purple-400 transition-colors shadow-lg">
+
               <Camera className="w-3.5 h-3.5 text-white" />
+
             </button>
           </div>
 
           {/* USER INFO */}
           <div className="flex-1 text-center sm:text-left">
+
             {editMode ? (
+
               <input
                 value={username}
                 onChange={(e) =>
-                  setUsername(e.target.value)
+                  setUsername(
+                    e.target.value
+                  )
                 }
                 className="input-gaming text-xl font-bold px-3 py-1 rounded-xl mb-1 w-full sm:w-auto"
               />
+
             ) : (
+
               <h2 className="text-2xl font-bold font-sora text-white">
-                {userProfile?.username ?? 'User'}
+                {userProfile?.username ??
+                  'User'}
               </h2>
             )}
 
             <p className="text-white/50 text-sm">
-              {userProfile?.email ?? 'No Email'}
+              {userProfile?.email ??
+                'No Email'}
             </p>
 
             <div className="flex items-center gap-2 mt-2 justify-center sm:justify-start">
+
               <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-yellow-500/20 border border-yellow-500/20">
+
                 <Crown className="w-3 h-3 text-yellow-400" />
 
                 <span className="text-xs text-yellow-400 font-semibold">
@@ -166,6 +268,7 @@ export const ProfilePage = () => {
                     : 'bg-red-500/20 border border-red-500/20'
                 }`}
               >
+
                 <div
                   className={`w-1.5 h-1.5 rounded-full ${
                     userProfile?.accountStatus ===
@@ -190,10 +293,13 @@ export const ProfilePage = () => {
             </div>
           </div>
 
-          {/* EDIT BUTTON */}
+          {/* EDIT */}
           <div>
+
             {editMode ? (
+
               <div className="flex gap-2">
+
                 <GlowButton
                   size="sm"
                   onClick={handleSave}
@@ -206,20 +312,27 @@ export const ProfilePage = () => {
                   size="sm"
                   variant="ghost"
                   onClick={() => {
+
                     setEditMode(false);
+
                     setUsername(
-                      userProfile?.username ?? ''
+                      userProfile?.username ??
+                        ''
                     );
                   }}
                 >
                   Cancel
                 </GlowButton>
               </div>
+
             ) : (
+
               <GlowButton
                 size="sm"
                 variant="ghost"
-                onClick={() => setEditMode(true)}
+                onClick={() =>
+                  setEditMode(true)
+                }
               >
                 <Edit3 className="w-3.5 h-3.5" />
                 Edit
@@ -230,6 +343,7 @@ export const ProfilePage = () => {
 
         {/* STATS */}
         <div className="grid grid-cols-3 gap-3 mt-5 relative z-10">
+
           {[
             {
               label: 'Total Balance',
@@ -239,22 +353,26 @@ export const ProfilePage = () => {
             {
               label: 'Total Matches',
               value: String(
-                userProfile?.totalMatches ?? 0
+                userProfile?.totalMatches ??
+                  0
               ),
               color: 'text-cyan-400',
             },
             {
               label: 'Total Points',
               value: (
-                userProfile?.totalPoints ?? 0
+                userProfile?.totalPoints ??
+                0
               ).toLocaleString(),
               color: 'text-yellow-400',
             },
           ].map((stat, i) => (
+
             <div
               key={i}
               className="text-center p-3 rounded-xl bg-black/20"
             >
+
               <p
                 className={`text-lg font-bold font-sora ${stat.color}`}
               >
@@ -271,19 +389,31 @@ export const ProfilePage = () => {
 
       {/* REFERRAL */}
       <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1 }}
+        initial={{
+          opacity: 0,
+          y: 10,
+        }}
+        animate={{
+          opacity: 1,
+          y: 0,
+        }}
+        transition={{
+          delay: 0.1,
+        }}
         className="glass rounded-2xl p-4 border border-white/8"
       >
+
         <div className="flex items-center justify-between">
+
           <div>
+
             <p className="text-xs text-white/40 uppercase tracking-wider">
               Your Referral Code
             </p>
 
             <p className="text-xl font-bold font-mono text-purple-400 mt-1">
-              {userProfile?.referralCode ?? 'N/A'}
+              {userProfile?.referralCode ??
+                'N/A'}
             </p>
 
             <p className="text-xs text-white/40 mt-0.5">
@@ -293,9 +423,12 @@ export const ProfilePage = () => {
 
           <GlowButton
             size="sm"
-            onClick={() => navigate('/referral')}
+            onClick={() =>
+              navigate('/referral')
+            }
           >
             Share
+
             <ChevronRight className="w-3.5 h-3.5" />
           </GlowButton>
         </div>
@@ -303,22 +436,38 @@ export const ProfilePage = () => {
 
       {/* ACHIEVEMENTS */}
       <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
+        initial={{
+          opacity: 0,
+          y: 10,
+        }}
+        animate={{
+          opacity: 1,
+          y: 0,
+        }}
+        transition={{
+          delay: 0.2,
+        }}
         className="glass rounded-2xl border border-white/8 overflow-hidden"
       >
+
         <div className="p-4 border-b border-white/5">
+
           <h3 className="font-semibold text-white flex items-center gap-2">
+
             <Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />
+
             Achievements
           </h3>
         </div>
 
         <div className="p-4 grid grid-cols-3 sm:grid-cols-5 gap-3">
+
           {achievements.map((ach) => {
+
             const unlocked =
-              userAchievements.includes(ach.id);
+              userAchievements.includes(
+                ach.id
+              );
 
             return (
               <div
@@ -330,6 +479,7 @@ export const ProfilePage = () => {
                     : 'bg-white/3 border-white/5 opacity-40'
                 }`}
               >
+
                 <div className="text-2xl mb-1">
                   {ach.emoji}
                 </div>
@@ -345,51 +495,77 @@ export const ProfilePage = () => {
 
       {/* SETTINGS */}
       <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3 }}
+        initial={{
+          opacity: 0,
+          y: 10,
+        }}
+        animate={{
+          opacity: 1,
+          y: 0,
+        }}
+        transition={{
+          delay: 0.3,
+        }}
         className="glass rounded-2xl border border-white/8 overflow-hidden"
       >
+
         {[
           {
             icon: Shield,
-            label: 'Security & Privacy',
+            label:
+              'Security & Privacy',
             desc: 'Password, 2FA',
             onClick: () =>
-              toast('Coming soon!'),
+              toast(
+                'Coming soon!'
+              ),
           },
+
           {
             icon: Bell,
             label: 'Notifications',
             desc: 'Manage alerts',
             onClick: () =>
-              navigate('/notifications'),
+              navigate(
+                '/notifications'
+              ),
           },
+
           {
             icon: Gamepad2,
             label: 'Game History',
-            desc: 'View all matches',
+            desc:
+              'View all matches',
             onClick: () =>
-              navigate('/wallet'),
+              navigate(
+                '/history'
+              ),
           },
+
           {
             icon: Trophy,
             label: 'Leaderboard',
             desc: 'Your ranking',
             onClick: () =>
-              navigate('/leaderboard'),
+              navigate(
+                '/leaderboard'
+              ),
           },
         ].map((item, i) => (
+
           <button
             key={i}
             onClick={item.onClick}
             className="w-full flex items-center gap-4 p-4 hover:bg-white/3 transition-colors border-b border-white/5 last:border-0"
           >
+
             <div className="w-9 h-9 rounded-xl bg-white/5 flex items-center justify-center">
+
               <item.icon className="w-4 h-4 text-white/60" />
             </div>
 
             <div className="flex-1 text-left">
+
               <p className="text-sm font-medium text-white">
                 {item.label}
               </p>
@@ -406,10 +582,17 @@ export const ProfilePage = () => {
 
       {/* LOGOUT */}
       <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.4 }}
+        initial={{
+          opacity: 0,
+        }}
+        animate={{
+          opacity: 1,
+        }}
+        transition={{
+          delay: 0.4,
+        }}
       >
+
         <GlowButton
           fullWidth
           variant="red"
@@ -417,6 +600,7 @@ export const ProfilePage = () => {
           size="lg"
         >
           <LogOut className="w-4 h-4" />
+
           Logout
         </GlowButton>
       </motion.div>
