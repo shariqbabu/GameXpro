@@ -208,8 +208,7 @@ export const ColorPredictionGame = () => {
             snap.exists()
           ) {
 
-            setWalletData(
-              snap.data()
+            setWalletData(snap.data()
             );
           }
         }
@@ -286,7 +285,6 @@ export const ColorPredictionGame = () => {
           latestRound + 1
         );
       }
-    },
         },
         (error) => {
           console.error(
