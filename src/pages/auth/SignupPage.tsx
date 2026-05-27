@@ -39,28 +39,25 @@ export const SignupPage = () => {
       const signupBonus = MOCK_ADMIN_SETTINGS.signupBonus;
 
       // Create user document
-      await setDoc(doc(db, 'users', user.uid), {
-        uid: user.uid,
-        email: form.email,
-        username: form.username,
-        displayName: form.username,
-        photoURL: '',
-        role: 'user',
-        referralCode,
-        referredBy: form.referralCode || null,
-        walletBalance: signupBonus,
-        winningBalance: 0,
-        depositBalance: 0,
-        bonusBalance: signupBonus,
-        referralEarnings: 0,
-        lockedBalance: 0,
-        totalPoints: 0,
-        totalMatches: 0,
-        accountStatus: 'active',
-        joinDate: serverTimestamp(),
-        lastActive: serverTimestamp(),
-        achievements: [],
-      });
+      await setDoc(
+  doc(db, 'users', user.uid),
+  {
+    uid: user.uid,
+    username,
+    email,
+    role: 'user',
+    photoURL: '',
+    referralCode,
+    referredBy:
+      referredBy || null,
+    totalMatches: 0,
+    totalPoints: 0,
+    achievements: [],
+    accountStatus: 'active',
+    createdAt:
+      serverTimestamp(),
+  }
+);
 
       // Create wallet
       await setDoc(doc(db, 'wallets', user.uid), {
