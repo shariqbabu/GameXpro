@@ -11,6 +11,7 @@ import {
   listenToGame, submitRoll, tickTimer, forfeitGame,
   settlePrize, type LudoGameDoc,
 } from '../../services/ludoService';
+
 const PATH: [number, number][] = [
   [1,6],[2,6],[3,6],[4,6],[5,6],
   [6,5],[6,4],[6,3],[6,2],[6,1],[6,0],
@@ -141,10 +142,10 @@ function drawBoard(canvas: HTMLCanvasElement, game: LudoGameDoc) {
 type UIPhase = 'lobby' | 'matchmaking' | 'in_game' | 'game_over';
 
 export const LudoGame = () => {
-  const navigate                        = useNavigate();
+  const navigate                                     = useNavigate();
   const { userProfile, currentUser, refreshProfile } = useAuth();
-  const uid                             = currentUser?.uid ?? '';
-  const uname                           = userProfile?.username ?? 'Player';
+  const uid                                          = currentUser?.uid ?? '';
+  const uname                                        = userProfile?.username ?? 'Player';
 
   const [uiPhase,   setUiPhase]   = useState<UIPhase>('lobby');
   const [entryFee,  setEntryFee]  = useState(50);
@@ -163,15 +164,14 @@ export const LudoGame = () => {
   const unsubMatch     = useRef<(()=>void)|null>(null);
   const timerRef       = useRef<ReturnType<typeof setInterval>|null>(null);
   const mmTimerRef     = useRef<ReturnType<typeof setInterval>|null>(null);
-  const cancelTimerRef = useRef<ReturnType<typeof setTimeout>|null>(null); // FIX 6
+  const cancelTimerRef = useRef<ReturnType<typeof setTimeout>|null>(null);
   const settledRef     = useRef(false);
   const gameIdRef      = useRef<string>('');
-  const uiPhaseRef     = useRef<UIPhase>('lobby'); // FIX 1: track phase in ref
+  const uiPhaseRef     = useRef<UIPhase>('lobby');
   const myRoleRef      = useRef<'player1'|'player2'>('player1');
 
-  // Keep refs in sync
   useEffect(() => { uiPhaseRef.current = uiPhase; }, [uiPhase]);
-  useEffect(() => { myRoleRef.current = myRole; }, [myRole]);
+  useEffect(() => { myRoleRef.current  = myRole;  }, [myRole]);
 
   useEffect(() => {
     if (gameDoc && canvasRef.current) drawBoard(canvasRef.current, gameDoc);
@@ -181,13 +181,12 @@ export const LudoGame = () => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [log]);
 
-  // Cleanup on unmount
   useEffect(() => () => {
     unsubGame.current?.();
     unsubMatch.current?.();
     if (timerRef.current)       clearInterval(timerRef.current);
     if (mmTimerRef.current)     clearInterval(mmTimerRef.current);
-    if (cancelTimerRef.current) clearTimeout(cancelTimerRef.current); // FIX 6
+    if (cancelTimerRef.current) clearTimeout(cancelTimerRef.current);
   }, []);
 
   const addLog = (msg: string, type: 'p1'|'p2'|'sys' = 'sys') =>
@@ -207,9 +206,9 @@ export const LudoGame = () => {
       const isWinner = g.winnerId === uid;
       const isDraw   = g.winnerId === null;
 
-      if (isDraw)          toast.success('Match Draw!');
-      else if (isWinner)   toast.success(`🏆 ₹${g.prizePool} added to wallet!`);
-      else                 toast.error('You lost the match');
+      if (isDraw)        toast.success('Match Draw!');
+      else if (isWinner) toast.success(`🏆 ₹${g.prizePool} added to wallet!`);
+      else               toast.error('You lost the match');
 
       setUiPhase('game_over');
     } catch (e: any) {
@@ -228,7 +227,7 @@ export const LudoGame = () => {
       }
     });
 
-    // FIX 5: Only player1 drives the timer to avoid double Firestore writes
+    // Sirf player1 timer drive karta hai — double Firestore writes se bachao
     timerRef.current = setInterval(async () => {
       if (myRoleRef.current === 'player1') {
         try { await tickTimer(gid); } catch {}
@@ -239,14 +238,7 @@ export const LudoGame = () => {
   // ── Find Match ─────────────────────────────────────────────────────────────
   const findMatch = useCallback(async () => {
     if (!uid) return toast.error('Please login first');
-    // AuthContext ya userProfile jo bhi wallet data fetch karta hai,
-// wahan 'wallets' collection se padhna chahiye
-// Ya phir LudoGame.tsx mein directly:
-const balance = (userProfile?.winningBalance ?? 0)
-              + (userProfile?.depositBalance ?? 0)
-              + (userProfile?.bonusBalance   ?? 0);
-// Ya agar totalBalance field available hai:
-const balance = userProfile?.totalBalance ?? 0;
+    const balance = userProfile?.totalBalance ?? 0;
     if (balance < entryFee) return toast.error(`Insufficient balance! Need ₹${entryFee}`);
 
     setUiPhase('matchmaking');
@@ -255,13 +247,12 @@ const balance = userProfile?.totalBalance ?? 0;
     mmTimerRef.current = setInterval(() => setMmSeconds(s => s + 1), 1000);
     addLog('Searching for opponent...', 'sys');
 
-    // Capture entryFee at call time for closure safety (FIX 2)
     const feeSnapshot = entryFee;
 
     try {
       const { gameId, role } = await joinMatchmaking(uid, uname, feeSnapshot);
       setMyRole(role);
-      myRoleRef.current = role;
+      myRoleRef.current  = role;
       settledRef.current = false;
 
       if (role === 'player2') {
@@ -274,7 +265,7 @@ const balance = userProfile?.totalBalance ?? 0;
       } else {
         unsubMatch.current = listenForMatch(uid, (gid, foundRole) => {
           if (mmTimerRef.current)     clearInterval(mmTimerRef.current);
-          if (cancelTimerRef.current) clearTimeout(cancelTimerRef.current); // FIX 6
+          if (cancelTimerRef.current) clearTimeout(cancelTimerRef.current);
           unsubMatch.current?.();
           setMyRole(foundRole);
           myRoleRef.current = foundRole;
@@ -285,12 +276,11 @@ const balance = userProfile?.totalBalance ?? 0;
           uiPhaseRef.current = 'in_game';
         });
 
-        // FIX 1: Use ref instead of state for phase check; FIX 6: store timeout ref
         cancelTimerRef.current = setTimeout(async () => {
-          if (uiPhaseRef.current !== 'matchmaking') return; // FIX 1
+          if (uiPhaseRef.current !== 'matchmaking') return;
           unsubMatch.current?.();
           if (mmTimerRef.current) clearInterval(mmTimerRef.current);
-          await cancelMatchmaking(uid, feeSnapshot); // FIX 2: use captured fee
+          await cancelMatchmaking(uid, feeSnapshot);
           toast.error('No opponent found. Entry fee refunded.');
           setUiPhase('lobby');
           uiPhaseRef.current = 'lobby';
@@ -303,12 +293,12 @@ const balance = userProfile?.totalBalance ?? 0;
       setUiPhase('lobby');
       uiPhaseRef.current = 'lobby';
     }
-  }, [uid, uname, entryFee, userProfile?.walletBalance, startGameListener]);
+  }, [uid, uname, entryFee, userProfile?.totalBalance, startGameListener]);
 
   const cancelSearch = async () => {
     unsubMatch.current?.();
     if (mmTimerRef.current)     clearInterval(mmTimerRef.current);
-    if (cancelTimerRef.current) clearTimeout(cancelTimerRef.current); // FIX 6
+    if (cancelTimerRef.current) clearTimeout(cancelTimerRef.current);
     try {
       await cancelMatchmaking(uid, entryFee);
       toast.success('Search cancelled. Entry fee refunded.');
@@ -344,7 +334,7 @@ const balance = userProfile?.totalBalance ?? 0;
           const msg = e instanceof Error ? e.message : 'Roll failed';
           toast.error(msg);
         } finally {
-          setRolling(false); // FIX 7: always reset even on error
+          setRolling(false);
         }
       }
     }, 80);
@@ -361,12 +351,11 @@ const balance = userProfile?.totalBalance ?? 0;
   const formatTime = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2,'0')}:${(s % 60).toString().padStart(2,'0')}`;
 
-  const balance  = userProfile?.walletBalance ?? 0;
-  const prize    = Math.floor(entryFee * 2 * 0.95);
-  const isMyTurn = gameDoc?.currentTurn === uid;
+  const balance   = userProfile?.totalBalance ?? 0;
+  const prize     = Math.floor(entryFee * 2 * 0.95);
+  const isMyTurn  = gameDoc?.currentTurn === uid;
   const timerWarn = (gameDoc?.timeLeft ?? 999) <= 30;
 
-  // FIX 4: derive opponent name consistently from gameDoc
   const opponentName = gameDoc
     ? (myRole === 'player1' ? gameDoc.player2?.name : gameDoc.player1.name) ?? 'Opponent'
     : 'Opponent';
@@ -377,7 +366,6 @@ const balance = userProfile?.totalBalance ?? 0;
     const oppPlayer = myRole === 'player1' ? gameDoc.player2! : gameDoc.player1;
     const iWon      = gameDoc.winnerId === uid;
     const isDraw    = gameDoc.winnerId === null;
-    // FIX 4: use opponentName (derived above) instead of separate variable
     return { myPlayer, oppPlayer, iWon, isDraw, prize: gameDoc.prizePool, oppName: opponentName };
   };
 
@@ -507,7 +495,7 @@ const balance = userProfile?.totalBalance ?? 0;
   if (uiPhase === 'game_over') {
     const result = getResultInfo();
     if (!result) return null;
-    const { myPlayer, oppPlayer, iWon, isDraw, oppName } = result; // FIX 4
+    const { myPlayer, oppPlayer, iWon, isDraw, oppName } = result;
 
     return (
       <div className="max-w-md mx-auto py-10 px-4 text-center space-y-6">
@@ -525,8 +513,8 @@ const balance = userProfile?.totalBalance ?? 0;
 
         <div className="grid grid-cols-2 gap-3">
           {[
-            { p: myPlayer,  label: 'You',     isWinner: iWon,          borderClass: 'border-purple-500/40' },
-            { p: oppPlayer, label: oppName,    isWinner: !iWon && !isDraw, borderClass: 'border-white/10' }, // FIX 4
+            { p: myPlayer,  label: 'You',    isWinner: iWon,             borderClass: 'border-purple-500/40' },
+            { p: oppPlayer, label: oppName,  isWinner: !iWon && !isDraw,  borderClass: 'border-white/10'     },
           ].map(({ p, label, isWinner, borderClass }) => (
             <div key={label} className={`glass rounded-2xl p-5 border-2 ${isWinner && !isDraw ? 'border-yellow-500/50' : borderClass}`}>
               {isWinner && !isDraw && <div className="text-xs text-yellow-400 font-bold tracking-widest mb-2">👑 WINNER</div>}
@@ -541,7 +529,6 @@ const balance = userProfile?.totalBalance ?? 0;
           <GlowButton variant="ghost" onClick={() => { setGameDoc(null); setUiPhase('lobby'); uiPhaseRef.current = 'lobby'; }}>
             Back to Lobby
           </GlowButton>
-          {/* FIX 3: Reset state fully before calling findMatch */}
           <GlowButton onClick={() => {
             setGameDoc(null);
             settledRef.current = false;
@@ -583,7 +570,6 @@ const balance = userProfile?.totalBalance ?? 0;
             Prize: <span className="text-green-400 font-bold">₹{gameDoc.prizePool}</span>
           </p>
         </div>
-
         <div className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-xl border font-mono font-bold text-lg transition-all ${
           timerWarn ? 'bg-red-900/30 border-red-500/50 text-red-400 animate-pulse'
                     : 'bg-yellow-900/10 border-yellow-700/25 text-yellow-400'
@@ -595,8 +581,8 @@ const balance = userProfile?.totalBalance ?? 0;
 
       <div className="grid grid-cols-2 gap-2">
         {[
-          { p: myPlayer,  label: 'You',         isActive: isMyTurn,  col:'#FF7675', border: isMyTurn  ? 'border-red-500'  : 'border-red-900/30'  },
-          { p: oppPlayer, label: opponentName,   isActive: !isMyTurn, col:'#74B9FF', border: !isMyTurn ? 'border-blue-500' : 'border-blue-900/30' },
+          { p: myPlayer,  label: 'You',        isActive: isMyTurn,  col:'#FF7675', border: isMyTurn  ? 'border-red-500'  : 'border-red-900/30'  },
+          { p: oppPlayer, label: opponentName,  isActive: !isMyTurn, col:'#74B9FF', border: !isMyTurn ? 'border-blue-500' : 'border-blue-900/30' },
         ].map(({ p, label, isActive, col, border }) => (
           <div key={label} className={`flex items-center justify-between px-4 py-3 glass rounded-2xl border-2 transition-all ${border}`}>
             <div>
