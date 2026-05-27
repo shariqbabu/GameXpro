@@ -11,13 +11,14 @@ import { TransactionsPage } from './pages/TransactionsPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { ReferralPage } from './pages/ReferralPage';
 import { useAuth } from './hooks/useAuth';
-
+import DiceGame from '../games/dice/pages/DiceGame';
 
 
 export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/login" replace />} />
+      <Route path="/dice" element={<DiceGame />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
