@@ -198,33 +198,77 @@ export const LudoGame = () => {
     setLog(prev => [...prev.slice(-24), { msg, type }]);
 
   // Handle game finish
-  const handleGameFinish = useCallback(async (g: LudoGameDoc) => {
+  const handleGameFinish = useCallback(
+  async (g: LudoGameDoc) => {
+
     if (settledRef.current) return;
+
     settledRef.current = true;
-    if (timerRef.current) clearInterval(timerRef.current);
 
-   try {
-
-  await settlePrize(g);
-
-  // wait firestore sync
-  await new Promise(resolve =>
-    setTimeout(resolve, 1500)
-  );
-
-  await refreshProfile();
-
-  toast.success(
-    g.winnerId === uid
-      ? `₹${g.prizePool} added to wallet`
-      : 'Match finished'
-  );
-
-} catch (e) {
-      console.error('Prize settle error:', e);
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
     }
-    setUiPhase('game_over');
-  }, [refreshProfile]);
+
+    try {
+
+      // SETTLE PRIZE
+      await settlePrize(g);
+
+      // WAIT FIRESTORE SYNC
+      await new Promise((resolve) =>
+        setTimeout(resolve, 1500)
+      );
+
+      // REFRESH PROFILE
+      await refreshProfile();
+
+      // RESULT STATUS
+      const isWinner =
+        g.winnerId === uid;
+
+      const isDraw =
+        g.winnerId === null;
+
+      // TOAST
+      if (isDraw) {
+
+        toast.success(
+          'Match Draw!'
+        );
+
+      } else if (isWinner) {
+
+        toast.success(
+          `🏆 ₹${g.prizePool} added to wallet!`
+        );
+
+      } else {
+
+        toast.error(
+          'You lost the match'
+        );
+      }
+
+      // OPEN GAME OVER SCREEN
+      setUiPhase('game_over');
+
+    } catch (e: any) {
+
+      console.error(
+        'Prize settle error:',
+        e
+      );
+
+      toast.error(
+        e?.message ||
+        'Prize settlement failed'
+      );
+
+      settledRef.current = false;
+    }
+  },
+  [refreshProfile, uid,]
+);
 
   // Start game listener
   const startGameListener = useCallback((gid: string) => {
