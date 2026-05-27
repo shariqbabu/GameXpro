@@ -3,11 +3,10 @@
 import {
   doc, collection, getDoc, setDoc, updateDoc,
   onSnapshot, runTransaction, serverTimestamp,
-  query, where, getDocs, deleteDoc, Timestamp, // ← FIX 1: added Timestamp
+  query, where, getDocs, deleteDoc,
+  // Timestamp removed — not needed anymore
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 export type GotiPos = [number, number, number, number];
 
@@ -34,15 +33,11 @@ export interface LudoGameDoc {
   prizeSettled: boolean;
   createdAt: unknown;
   startedAt: unknown;
-  finishedAt: unknown | null; // ← FIX 3: allow null
+  finishedAt: unknown | null;
 }
-
-// ─── Constants ────────────────────────────────────────────────────────────────
 
 const PLATFORM_CUT = 0.05;
 const GAME_DURATION = 300;
-
-// ─── Wallet Helpers ───────────────────────────────────────────────────────────
 
 export async function deductWallet(uid: string, amount: number, gameId: string): Promise<void> {
   const userRef = doc(db, 'users', uid);
@@ -66,7 +61,12 @@ export async function deductWallet(uid: string, amount: number, gameId: string):
   });
 }
 
-export async function creditWallet(uid: string, amount: number, gameId: string, type = 'game_win'): Promise<void> {
+export async function creditWallet(
+  uid: string,
+  amount: number,
+  gameId: string,
+  type = 'game_win'
+): Promise<void> {
   const userRef = doc(db, 'users', uid);
   const txRef   = doc(collection(db, 'transactions'));
 
@@ -85,7 +85,7 @@ export async function creditWallet(uid: string, amount: number, gameId: string, 
         type === 'game_win'
           ? `Ludo prize ₹${amount}`
           : `Ludo refund ₹${amount}`,
-      createdAt: serverTimestamp(), // ← FIX 2: was Timestamp.now(), now consistent
+      createdAt: serverTimestamp(),
     });
   });
 }
@@ -188,8 +188,6 @@ export function listenForMatch(
   return () => { unsub1(); unsub2(); };
 }
 
-// ─── Live Game ────────────────────────────────────────────────────────────────
-
 export function listenToGame(gameId: string, onUpdate: (g: LudoGameDoc) => void): () => void {
   return onSnapshot(doc(db, 'games', gameId), (snap) => {
     if (snap.exists()) onUpdate(snap.data() as LudoGameDoc);
@@ -250,7 +248,6 @@ export async function tickTimer(gameId: string): Promise<void> {
     if (newTime === 0) {
       const p1s = game.player1.score;
       const p2s = game.player2?.score ?? 0;
-      // ← FIX 4: guard draw case — only assign winner if player2 exists
       const winnerId = p1s > p2s ? game.player1.uid
                      : p2s > p1s && game.player2 ? game.player2.uid
                      : null;
@@ -273,15 +270,46 @@ export async function forfeitGame(gameId: string, uid: string): Promise<void> {
   });
 }
 
+// ─── settlePrize — FIXED ─────────────────────────────────────────────────────
+// FIX: Atomic transaction — prizeSettled check + mark + credit ek saath
+// Pehle prizeSettled check karo INSIDE transaction, race condition impossible
 export async function settlePrize(game: LudoGameDoc): Promise<void> {
-  if (game.prizeSettled) return;
-  await updateDoc(doc(db, 'games', game.gameId), { prizeSettled: true });
+  const gameRef = doc(db, 'games', game.gameId);
 
-  if (game.winnerId) {
-    await creditWallet(game.winnerId, game.prizePool, game.gameId, 'game_win');
-  } else {
-    const refAmt = Math.floor(game.entryFee * (1 - PLATFORM_CUT));
-    await creditWallet(game.player1.uid, refAmt, game.gameId, 'game_refund');
-    if (game.player2) await creditWallet(game.player2.uid, refAmt, game.gameId, 'game_refund');
+  // Step 1: Atomically claim the right to settle
+  // Agar koi aur pehle settle kar chuka hai, yeh transaction abort ho jaayegi
+  let alreadySettled = false;
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(gameRef);
+    if (!snap.exists()) throw new Error('Game not found');
+    const fresh = snap.data() as LudoGameDoc;
+
+    if (fresh.prizeSettled) {
+      alreadySettled = true;
+      return; // doosre client ne pehle settle kar diya — kuch mat karo
+    }
+
+    // Mark settled INSIDE transaction — only one client wins this race
+    tx.update(gameRef, { prizeSettled: true });
+  });
+
+  if (alreadySettled) return;
+
+  // Step 2: Credit wallet — ab sirf ek hi client yahaan tak pahuncha hai
+  try {
+    if (game.winnerId) {
+      await creditWallet(game.winnerId, game.prizePool, game.gameId, 'game_win');
+    } else {
+      // Draw — dono ko refund (minus platform cut)
+      const refAmt = Math.floor(game.entryFee * (1 - PLATFORM_CUT));
+      await creditWallet(game.player1.uid, refAmt, game.gameId, 'game_refund');
+      if (game.player2) {
+        await creditWallet(game.player2.uid, refAmt, game.gameId, 'game_refund');
+      }
+    }
+  } catch (err) {
+    // Credit fail ho gaya — prizeSettled ko wapas false karo taaki retry ho sake
+    await updateDoc(gameRef, { prizeSettled: false }).catch(() => {});
+    throw err; // UI ko error dikhao
   }
 }
