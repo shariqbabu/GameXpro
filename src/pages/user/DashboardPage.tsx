@@ -45,10 +45,10 @@ export const DashboardPage = () => {
     return () => clearInterval(interval);
   }, []);
 
-  const totalBalance = (userProfile?.walletBalance || 1250);
-  const winBalance = (userProfile?.winningBalance || 750);
-  const totalMatches = (userProfile?.totalMatches || 47);
-  const totalPoints = (userProfile?.totalPoints || 8500);
+ const totalBalance = userProfile?.walletBalance ?? 0;
+const winBalance = userProfile?.winningBalance ?? 0;
+const totalMatches = userProfile?.totalMatches ?? 0;
+const totalPoints = userProfile?.totalPoints ?? 0;
 
   return (
     <div className="space-y-6 pb-4">
@@ -70,7 +70,7 @@ export const DashboardPage = () => {
               <span className="text-xs text-white/50 uppercase tracking-wider">Online & Ready</span>
             </div>
             <h1 className="text-2xl lg:text-3xl font-bold font-sora text-white">
-              Hey, {userProfile?.username || 'Champion'}! 👋
+             Hey, {userProfile?.username ?? 'User'}! 👋
             </h1>
             <p className="text-white/50 text-sm mt-1">Ready to win big today?</p>
             <div className="flex items-center gap-4 mt-3">
@@ -295,7 +295,7 @@ export const DashboardPage = () => {
           <p className="text-sm text-white/50">Share your referral code and earn ₹{100} per referral</p>
           <div className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-black/30 border border-green-500/20">
             <Crown className="w-3.5 h-3.5 text-green-400" />
-            <span className="text-sm font-bold text-green-400 font-mono">{userProfile?.referralCode || 'DEMO123'}</span>
+            <span className="text-sm font-bold text-green-400 font-mono">{userProfile?.referralCode ?? 'N/A'}</span>
           </div>
         </div>
         <GlowButton onClick={() => navigate('/referral')} variant="green">
