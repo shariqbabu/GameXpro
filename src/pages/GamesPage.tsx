@@ -3,6 +3,7 @@
 // ============================================================
 
 import { Link } from 'react-router-dom';
+import { StatCard, GlowButton } from '../components';
 import { motion } from 'framer-motion';
 import { Gamepad2, Users, Zap, Clock } from 'lucide-react';
 
