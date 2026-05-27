@@ -161,3 +161,4 @@ export function LoginPage() {
     </div>
   );
 }
+export default app;
