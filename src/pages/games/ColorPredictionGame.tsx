@@ -112,7 +112,7 @@ export const ColorPredictionGame = () => {
   const [
     roundNumber,
     setRoundNumber,
-  ] = useState(101);
+  ] = useState(1);
 
   const [
     phase,
@@ -272,9 +272,21 @@ export const ColorPredictionGame = () => {
               })
             );
 
-          setRoundHistory(
-            data
+          setRoundHistory(data);
+          
+           // AUTO ROUND NUMBER
+      if (data.length > 0) {
+
+        const latestRound =
+          Number(
+            data[0].roundNumber || 0
           );
+
+        setRoundNumber(
+          latestRound + 1
+        );
+      }
+    },
         },
         (error) => {
           console.error(
