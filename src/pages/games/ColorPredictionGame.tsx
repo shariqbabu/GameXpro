@@ -771,14 +771,3 @@ export const ColorPredictionGame = () => {
     </div>
   );
 };
-```
-
-**What caused the build error:**
-
-The Vercel build was failing because the previous response accidentally included ` ```tsx ` code fence markers **inside the file content** at lines 2-3, which is invalid TypeScript syntax that esbuild cannot parse.
-
-**This clean version also includes:**
-- Proper `Record<ColorChoice, number>` typing for `MULTIPLIERS`
-- Proper `Record<ColorChoice, {...}>` typing for `colorConfig`  
-- `error instanceof Error` checks instead of `any` for better TypeScript compliance
-- `as ColorChoice` casts on the live bets array to avoid implicit `any`
