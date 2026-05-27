@@ -1,35 +1,18 @@
+// src/pages/games/LudoGame.tsx
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { ChevronLeft, Clock, Trophy, Shield, RotateCcw } from 'lucide-react';
+import { GlowButton } from '../../components/ui/GlowButton';
 import toast from 'react-hot-toast';
+import { ChevronLeft, Clock, Trophy, Shield, Users, Zap, RotateCcw, Wallet } from 'lucide-react';
+import {
+  joinMatchmaking, cancelMatchmaking, listenForMatch,
+  listenToGame, submitRoll, tickTimer, forfeitGame,
+  settlePrize, type LudoGameDoc,
+} from '../../services/ludoService';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-type GamePhase = 'lobby' | 'in_game' | 'game_over';
-
-interface PlayerState {
-  name: string;
-  score: number;
-  rolls: number;
-  // 4 gotis: -1 = at home base, 0..51 = on board path
-  gotiPos: [number, number, number, number];
-}
-
-interface GameState {
-  phase: GamePhase;
-  currentPlayer: 1 | 2;
-  p1: PlayerState;
-  p2: PlayerState;
-  timeLeft: number;
-  round: number;
-  lastDice: number;
-  rolling: boolean;
-  log: { msg: string; player: 0 | 1 | 2 }[];
-}
-
-// ─── Board Path (15×15 grid, 52 cells) ───────────────────────────────────────
-// Each entry: [col, row] — Red starts at index 0, Blue offset by 26
+// ─── Board path: 52 cells, each = [col, row] on 15×15 grid ───────────────────
 const PATH: [number, number][] = [
   [1,6],[2,6],[3,6],[4,6],[5,6],
   [6,5],[6,4],[6,3],[6,2],[6,1],[6,0],
@@ -44,643 +27,647 @@ const PATH: [number, number][] = [
   [5,8],[4,8],[3,8],[2,8],[1,8],[0,8],
   [0,7],[0,6],
 ];
-
 const SAFE_IDX = new Set([0, 8, 13, 21, 26, 34, 39, 47]);
-
-// Home base positions for 4 gotis each player
 const P1_HOME: [number, number][] = [[1.5,1.5],[3.5,1.5],[1.5,3.5],[3.5,3.5]];
 const P2_HOME: [number, number][] = [[9.5,1.5],[11.5,1.5],[9.5,3.5],[11.5,3.5]];
-
 const DICE_FACES = ['⚀','⚁','⚂','⚃','⚄','⚅'];
-const TOTAL_SECS = 300;
+const ENTRY_FEES = [50, 100, 200, 500, 1000, 2000];
 
-// ─── Canvas Board Renderer ────────────────────────────────────────────────────
-
-function drawBoard(
-  canvas: HTMLCanvasElement,
-  p1: PlayerState,
-  p2: PlayerState,
-  currentPlayer: 1 | 2
-) {
+// ─── Canvas board renderer ────────────────────────────────────────────────────
+function drawBoard(canvas: HTMLCanvasElement, game: LudoGameDoc) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
-  const S = canvas.width;
+  const S  = canvas.width;
   const cs = S / 15;
 
   ctx.clearRect(0, 0, S, S);
-
-  // Board background
   ctx.fillStyle = '#12082A';
   ctx.beginPath();
   (ctx as any).roundRect?.(0, 0, S, S, 12);
   ctx.fill();
 
-  // Draw each cell
+  // Cells
   for (let r = 0; r < 15; r++) {
     for (let c = 0; c < 15; c++) {
       const x = c * cs, y = r * cs;
-      let fill = '#1A0A2E';
-      let stroke = 'rgba(200,168,75,0.12)';
+      let fill = '#1A0A2E', stroke = 'rgba(200,168,75,0.12)';
 
-      // Home quadrants
       if (r < 6 && c < 6)  { fill = '#2D0A0A'; stroke = 'rgba(214,48,49,0.25)'; }
       if (r < 6 && c > 8)  { fill = '#0A1A2D'; stroke = 'rgba(9,132,227,0.25)'; }
       if (r > 8 && c < 6)  { fill = '#0A1A2D'; stroke = 'rgba(9,132,227,0.15)'; }
       if (r > 8 && c > 8)  { fill = '#2D0A0A'; stroke = 'rgba(214,48,49,0.15)'; }
 
-      // Path cells
       const pidx = PATH.findIndex(([pc, pr]) => pc === c && pr === r);
-      if (pidx >= 0) {
-        fill = '#22123E';
-        stroke = 'rgba(200,168,75,0.35)';
-        if (SAFE_IDX.has(pidx)) fill = '#1A3020';
-      }
+      if (pidx >= 0) { fill = '#22123E'; stroke = 'rgba(200,168,75,0.35)'; }
+      if (pidx >= 0 && SAFE_IDX.has(pidx)) fill = '#1A3020';
 
-      // Home stretch lanes
-      if (c === 7 && r >= 1 && r <= 5) fill = '#2A1060';
-      if (r === 7 && c >= 1 && c <= 5) fill = '#2A1060';
+      if (c === 7 && r >= 1 && r <= 5)  fill = '#2A1060';
+      if (r === 7 && c >= 1 && c <= 5)  fill = '#2A1060';
       if (c === 7 && r >= 9 && r <= 13) fill = '#2A1060';
       if (r === 7 && c >= 9 && c <= 13) fill = '#2A1060';
+      if (r >= 6 && r <= 8 && c >= 6 && c <= 8) { fill = '#2A1450'; stroke = 'rgba(200,168,75,0.5)'; }
 
-      // Center 3×3
-      if (r >= 6 && r <= 8 && c >= 6 && c <= 8) {
-        fill = '#2A1450'; stroke = 'rgba(200,168,75,0.5)';
-      }
+      ctx.fillStyle = fill; ctx.strokeStyle = stroke; ctx.lineWidth = 0.5;
+      ctx.beginPath(); ctx.rect(x + 0.5, y + 0.5, cs - 1, cs - 1); ctx.fill(); ctx.stroke();
 
-      ctx.fillStyle = fill;
-      ctx.strokeStyle = stroke;
-      ctx.lineWidth = 0.5;
-      ctx.beginPath();
-      ctx.rect(x + 0.5, y + 0.5, cs - 1, cs - 1);
-      ctx.fill();
-      ctx.stroke();
-
-      // Safe star
       if (pidx >= 0 && SAFE_IDX.has(pidx)) {
         ctx.fillStyle = 'rgba(200,168,75,0.55)';
-        ctx.font = `${cs * 0.48}px serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        ctx.font = `${cs * 0.46}px serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText('★', x + cs / 2, y + cs / 2);
       }
     }
   }
 
   // Home base circles
-  const drawHomeCircles = (homes: [number, number][], color: string) => {
+  const homeCircles = (homes: [number,number][], col: 'red'|'blue') => {
     homes.forEach(([cx, cy]) => {
-      const x = cx * cs, y = cy * cs, r = cs * 0.38;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fillStyle = color === 'red' ? 'rgba(214,48,49,0.12)' : 'rgba(9,132,227,0.12)';
-      ctx.fill();
-      ctx.strokeStyle = color === 'red' ? 'rgba(214,48,49,0.45)' : 'rgba(9,132,227,0.45)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx * cs, cy * cs, cs * 0.37, 0, Math.PI * 2);
+      ctx.fillStyle = col === 'red' ? 'rgba(214,48,49,0.12)' : 'rgba(9,132,227,0.12)'; ctx.fill();
+      ctx.strokeStyle = col === 'red' ? 'rgba(214,48,49,0.45)' : 'rgba(9,132,227,0.45)';
+      ctx.lineWidth = 1; ctx.stroke();
     });
   };
-  drawHomeCircles(P1_HOME, 'red');
-  drawHomeCircles(P2_HOME, 'blue');
+  homeCircles(P1_HOME, 'red'); homeCircles(P2_HOME, 'blue');
 
   // Center triangles
   ctx.fillStyle = 'rgba(200,168,75,0.1)';
   const tri = (pts: [number,number][]) => {
     ctx.beginPath();
-    pts.forEach(([x,y],i)=> i===0 ? ctx.moveTo(x*cs,y*cs) : ctx.lineTo(x*cs,y*cs));
+    pts.forEach(([x,y],i) => i === 0 ? ctx.moveTo(x*cs,y*cs) : ctx.lineTo(x*cs,y*cs));
     ctx.closePath(); ctx.fill();
   };
   tri([[7,6],[9,6],[8,8]]); tri([[7,9],[9,9],[8,7]]);
   tri([[6,7],[6,9],[8,8]]); tri([[9,7],[9,9],[7,8]]);
-
-  // Crown center
-  ctx.font = `${cs * 1.1}px serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+  ctx.font = `${cs * 1.1}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText('♛', 8 * cs, 8 * cs);
 
-  // ── Draw Gotis ──
-  const drawGoti = (
-    cx: number, cy: number, radius: number,
-    baseColor: string, lightColor: string,
-    label: string, isActive: boolean
-  ) => {
-    // Drop shadow
-    ctx.beginPath();
-    ctx.arc(cx, cy + radius * 0.3, radius * 0.65, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(0,0,0,0.45)';
-    ctx.fill();
+  // Draw goti helper
+  const drawGoti = (cx: number, cy: number, r: number, base: string, light: string, label: string, active: boolean) => {
+    ctx.beginPath(); ctx.arc(cx, cy + r * 0.3, r * 0.65, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fill();
 
-    // Body gradient
-    const grad = ctx.createRadialGradient(
-      cx - radius * 0.28, cy - radius * 0.28, radius * 0.05,
-      cx, cy, radius
-    );
-    grad.addColorStop(0, lightColor);
-    grad.addColorStop(0.45, baseColor);
-    grad.addColorStop(1, 'rgba(0,0,0,0.75)');
-    ctx.beginPath();
-    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-    ctx.fillStyle = grad;
-    ctx.fill();
+    const g = ctx.createRadialGradient(cx - r * 0.28, cy - r * 0.28, r * 0.05, cx, cy, r);
+    g.addColorStop(0, light); g.addColorStop(0.45, base); g.addColorStop(1, 'rgba(0,0,0,0.75)');
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = g; ctx.fill();
+    ctx.strokeStyle = active ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = active ? 1.5 : 0.8; ctx.stroke();
 
-    // Rim
-    ctx.strokeStyle = isActive ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.3)';
-    ctx.lineWidth = isActive ? 1.5 : 0.8;
-    ctx.stroke();
-
-    // Active glow ring
-    if (isActive) {
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius + 2.5, 0, Math.PI * 2);
-      ctx.strokeStyle = lightColor;
-      ctx.lineWidth = 1;
-      ctx.globalAlpha = 0.5;
-      ctx.stroke();
-      ctx.globalAlpha = 1;
+    if (active) {
+      ctx.beginPath(); ctx.arc(cx, cy, r + 2.5, 0, Math.PI * 2);
+      ctx.strokeStyle = light; ctx.lineWidth = 1; ctx.globalAlpha = 0.5; ctx.stroke(); ctx.globalAlpha = 1;
     }
 
-    // Shine
-    ctx.beginPath();
-    ctx.arc(cx - radius * 0.27, cy - radius * 0.27, radius * 0.26, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.38)';
-    ctx.fill();
-
-    // Label
-    ctx.fillStyle = 'rgba(255,255,255,0.92)';
-    ctx.font = `bold ${radius * 0.82}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(label, cx, cy + 1);
+    ctx.beginPath(); ctx.arc(cx - r * 0.27, cy - r * 0.27, r * 0.26, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.38)'; ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = `bold ${r * 0.8}px sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(label, cx, cy + 1);
   };
+
+  const p1Active = game.currentTurn === game.player1.uid;
+  const p2Active = game.player2 && game.currentTurn === game.player2.uid;
 
   // P1 home gotis
   let p1hi = 0;
-  p1.gotiPos.forEach((pos, i) => {
-    if (pos === -1) {
-      const [cx, cy] = P1_HOME[p1hi++];
-      drawGoti(cx * cs, cy * cs, cs * 0.34, '#D63031', '#FF7675', String(i + 1), currentPlayer === 1);
-    }
+  game.player1.gotiPos.forEach((pos, i) => {
+    if (pos === -1) { const [cx,cy] = P1_HOME[p1hi++]; drawGoti(cx*cs, cy*cs, cs*0.34, '#D63031','#FF7675', String(i+1), !!p1Active); }
   });
 
   // P2 home gotis
   let p2hi = 0;
-  p2.gotiPos.forEach((pos, i) => {
-    if (pos === -1) {
-      const [cx, cy] = P2_HOME[p2hi++];
-      drawGoti(cx * cs, cy * cs, cs * 0.34, '#0984E3', '#74B9FF', String(i + 1), currentPlayer === 2);
-    }
+  game.player2?.gotiPos.forEach((pos, i) => {
+    if (pos === -1) { const [cx,cy] = P2_HOME[p2hi++]; drawGoti(cx*cs, cy*cs, cs*0.34, '#0984E3','#74B9FF', String(i+1), !!p2Active); }
   });
 
-  // P1 on-board gotis
-  p1.gotiPos.forEach((pos, i) => {
-    if (pos >= 0 && pos < PATH.length) {
-      const [c, r] = PATH[pos];
-      drawGoti((c + 0.5) * cs, (r + 0.5) * cs, cs * 0.37, '#D63031', '#FF7675', String(i + 1), currentPlayer === 1);
-    }
+  // On-board gotis
+  game.player1.gotiPos.forEach((pos, i) => {
+    if (pos >= 0) { const [c,r] = PATH[pos]; drawGoti((c+0.5)*cs,(r+0.5)*cs, cs*0.37,'#D63031','#FF7675',String(i+1),!!p1Active); }
   });
-
-  // P2 on-board gotis (offset 26)
-  p2.gotiPos.forEach((pos, i) => {
-    if (pos >= 0 && pos < PATH.length) {
-      const idx = (pos + 26) % 52;
-      const [c, r] = PATH[idx];
-      drawGoti((c + 0.5) * cs, (r + 0.5) * cs, cs * 0.37, '#0984E3', '#74B9FF', String(i + 1), currentPlayer === 2);
-    }
+  game.player2?.gotiPos.forEach((pos, i) => {
+    if (pos >= 0) { const idx=(pos+26)%52; const [c,r]=PATH[idx]; drawGoti((c+0.5)*cs,(r+0.5)*cs,cs*0.37,'#0984E3','#74B9FF',String(i+1),!!p2Active); }
   });
 }
 
-// ─── Initial State ────────────────────────────────────────────────────────────
-
-const makePlayer = (name: string): PlayerState => ({
-  name,
-  score: 0,
-  rolls: 0,
-  gotiPos: [-1, -1, -1, -1],
-});
-
-const initState = (p1name: string, p2name: string): GameState => ({
-  phase: 'in_game',
-  currentPlayer: 1,
-  p1: makePlayer(p1name),
-  p2: makePlayer(p2name),
-  timeLeft: TOTAL_SECS,
-  round: 1,
-  lastDice: 0,
-  rolling: false,
-  log: [{ msg: 'Game started! Roll the dice.', player: 0 }],
-});
-
 // ─── Main Component ───────────────────────────────────────────────────────────
+type UIPhase = 'lobby' | 'matchmaking' | 'in_game' | 'game_over';
 
 export const LudoGame = () => {
-  const navigate = useNavigate();
-  const { userProfile } = useAuth();
+  const navigate                        = useNavigate();
+  const { userProfile, currentUser, refreshProfile } = useAuth();
+  const uid                             = currentUser?.uid ?? '';
+  const uname                           = userProfile?.username ?? 'Player';
 
-  const [phase, setPhase] = useState<GamePhase>('lobby');
-  const [p1name, setP1name] = useState(userProfile?.username || 'Player 1');
-  const [p2name, setP2name] = useState('Player 2');
+  const [uiPhase,   setUiPhase]   = useState<UIPhase>('lobby');
+  const [entryFee,  setEntryFee]  = useState(50);
+  const [gameDoc,   setGameDoc]   = useState<LudoGameDoc | null>(null);
+  const [myRole,    setMyRole]    = useState<'player1'|'player2'>('player1');
+  const [diceDisp,  setDiceDisp]  = useState('⚄');
+  const [rolling,   setRolling]   = useState(false);
+  const [mmSeconds, setMmSeconds] = useState(0); // matchmaking wait time
+  const [log,       setLog]       = useState<{msg:string;type:'p1'|'p2'|'sys'}[]>([
+    { msg: 'Game starting...', type: 'sys' }
+  ]);
 
-  const [gs, setGs] = useState<GameState | null>(null);
-  const [diceDisplay, setDiceDisplay] = useState('⚄');
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const logRef = useRef<HTMLDivElement>(null);
+  const canvasRef   = useRef<HTMLCanvasElement>(null);
+  const logRef      = useRef<HTMLDivElement>(null);
+  const unsubGame   = useRef<(()=>void)|null>(null);
+  const unsubMatch  = useRef<(()=>void)|null>(null);
+  const timerRef    = useRef<ReturnType<typeof setInterval>|null>(null);
+  const mmTimerRef  = useRef<ReturnType<typeof setInterval>|null>(null);
+  const settledRef  = useRef(false);
+  const gameIdRef   = useRef<string>('');
 
-  // Redraw board whenever game state changes
+  // Redraw board on game state change
   useEffect(() => {
-    if (!gs || !canvasRef.current) return;
-    drawBoard(canvasRef.current, gs.p1, gs.p2, gs.currentPlayer);
-  }, [gs]);
+    if (gameDoc && canvasRef.current) drawBoard(canvasRef.current, gameDoc);
+  }, [gameDoc]);
 
-  // Scroll log to bottom
+  // Scroll log
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [gs?.log]);
+  }, [log]);
 
-  // Timer
-  useEffect(() => {
-    if (!gs || gs.phase !== 'in_game') return;
-    timerRef.current = setInterval(() => {
-      setGs(prev => {
-        if (!prev) return prev;
-        if (prev.timeLeft <= 1) {
-          clearInterval(timerRef.current!);
-          return { ...prev, timeLeft: 0, phase: 'game_over' };
-        }
-        return { ...prev, timeLeft: prev.timeLeft - 1 };
-      });
+  // Cleanup on unmount
+  useEffect(() => () => {
+    unsubGame.current?.(); unsubMatch.current?.();
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (mmTimerRef.current) clearInterval(mmTimerRef.current);
+  }, []);
+
+  const addLog = (msg: string, type: 'p1'|'p2'|'sys' = 'sys') =>
+    setLog(prev => [...prev.slice(-24), { msg, type }]);
+
+  // Handle game finish
+  const handleGameFinish = useCallback(async (g: LudoGameDoc) => {
+    if (settledRef.current) return;
+    settledRef.current = true;
+    if (timerRef.current) clearInterval(timerRef.current);
+
+    try {
+      await settlePrize(g);
+      await refreshProfile(); // refresh wallet balance
+    } catch (e) {
+      console.error('Prize settle error:', e);
+    }
+    setUiPhase('game_over');
+  }, [refreshProfile]);
+
+  // Start game listener
+  const startGameListener = useCallback((gid: string) => {
+    gameIdRef.current = gid;
+    unsubGame.current = listenToGame(gid, (g) => {
+      setGameDoc(g);
+
+      if (g.status === 'finished' && !settledRef.current) {
+        handleGameFinish(g);
+        return;
+      }
+
+      // Only one client (player1) drives the timer to avoid double-tick
+      // We check if it's our turn OR we are player1 to tick
+    });
+
+    // Timer: tick every second — both clients call tickTimer (Firestore tx makes it safe)
+    timerRef.current = setInterval(async () => {
+      try { await tickTimer(gid); } catch {}
     }, 1000);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [gs?.phase]);
+  }, [handleGameFinish]);
 
-  const startGame = () => {
-    const state = initState(p1name || 'Player 1', p2name || 'Player 2');
-    setGs(state);
-    setPhase('in_game');
-    setDiceDisplay('⚄');
+  // ── Find Match ─────────────────────────────────────────────────────────────
+  const findMatch = async () => {
+    if (!uid) return toast.error('Please login first');
+    const balance = userProfile?.walletBalance ?? 0;
+    if (balance < entryFee) return toast.error(`Insufficient balance! Need ₹${entryFee}`);
+
+    setUiPhase('matchmaking');
+    setMmSeconds(0);
+    mmTimerRef.current = setInterval(() => setMmSeconds(s => s + 1), 1000);
+    addLog('Searching for opponent...', 'sys');
+
+    try {
+      const { gameId, role } = await joinMatchmaking(uid, uname, entryFee);
+      setMyRole(role);
+      settledRef.current = false;
+
+      if (role === 'player2') {
+        // Game already created — listen directly
+        if (mmTimerRef.current) clearInterval(mmTimerRef.current);
+        addLog('Opponent found! Game starting...', 'sys');
+        toast.success('Opponent found! Game starting!');
+        startGameListener(gameId);
+        setUiPhase('in_game');
+      } else {
+        // We created a placeholder — wait for opponent via listener
+        unsubMatch.current = listenForMatch(uid, (gid, foundRole) => {
+          if (mmTimerRef.current) clearInterval(mmTimerRef.current);
+          unsubMatch.current?.();
+          setMyRole(foundRole);
+          addLog('Opponent joined! Game starting...', 'sys');
+          toast.success('Opponent found! Game starting!');
+          startGameListener(gid);
+          setUiPhase('in_game');
+        });
+
+        // Auto-cancel if waiting > 60 seconds
+        setTimeout(async () => {
+          if (uiPhase !== 'matchmaking') return;
+          unsubMatch.current?.();
+          if (mmTimerRef.current) clearInterval(mmTimerRef.current);
+          await cancelMatchmaking(uid, entryFee);
+          toast.error('No opponent found. Entry fee refunded.');
+          setUiPhase('lobby');
+        }, 60_000);
+      }
+    } catch (err: unknown) {
+      if (mmTimerRef.current) clearInterval(mmTimerRef.current);
+      const msg = err instanceof Error ? err.message : 'Something went wrong';
+      toast.error(msg);
+      setUiPhase('lobby');
+    }
   };
 
+  const cancelSearch = async () => {
+    unsubMatch.current?.();
+    if (mmTimerRef.current) clearInterval(mmTimerRef.current);
+    try {
+      await cancelMatchmaking(uid, entryFee);
+      toast.success('Search cancelled. Entry fee refunded.');
+    } catch {}
+    setUiPhase('lobby');
+  };
+
+  // ── Roll Dice ──────────────────────────────────────────────────────────────
   const rollDice = useCallback(() => {
-    if (!gs || gs.rolling || gs.phase !== 'in_game') return;
+    if (!gameDoc || rolling) return;
+    if (gameDoc.currentTurn !== uid) return toast.error("It's not your turn!");
 
-    setGs(prev => prev ? { ...prev, rolling: true } : prev);
-
+    setRolling(true);
     let count = 0;
-    const iv = setInterval(() => {
-      setDiceDisplay(DICE_FACES[Math.floor(Math.random() * 6)]);
+    const iv = setInterval(async () => {
+      setDiceDisp(DICE_FACES[Math.floor(Math.random() * 6)]);
       count++;
       if (count >= 10) {
         clearInterval(iv);
         const val = (Math.floor(Math.random() * 6) + 1) as 1|2|3|4|5|6;
-        setDiceDisplay(DICE_FACES[val - 1]);
-
-        setGs(prev => {
-          if (!prev) return prev;
-          const cp = prev.currentPlayer;
-          const pKey = cp === 1 ? 'p1' : 'p2';
-          const player = { ...prev[pKey] };
-          const gotiPos = [...player.gotiPos] as [number,number,number,number];
-
-          player.score += val;
-          player.rolls += 1;
-
-          // Goti movement logic
-          const activeIdx = gotiPos.findIndex(p => p >= 0);
-          const homeIdx   = gotiPos.findIndex(p => p === -1);
-          let logMsg = `${player.name} rolled ${val}.`;
-          let logPlayer: 0|1|2 = cp;
-
-          if (val === 6 && homeIdx >= 0) {
-            gotiPos[homeIdx] = 0;
-            logMsg = `${player.name} rolled 6! Goti ${homeIdx + 1} enters the board!`;
-          } else if (activeIdx >= 0) {
-            gotiPos[activeIdx] = (gotiPos[activeIdx] + val) % 52;
-            logMsg = `${player.name} rolled ${val}. Goti ${activeIdx + 1} moves forward.`;
-          } else {
-            logMsg = `${player.name} rolled ${val}. Need 6 to release a goti!`;
-          }
-
-          const extraTurn = val === 6;
-          if (extraTurn) logMsg += ' 🎉 Extra turn!';
-
-          const updatedPlayer = { ...player, gotiPos };
-          const nextPlayer: 1|2 = extraTurn ? cp : (cp === 1 ? 2 : 1);
-
-          return {
-            ...prev,
-            [pKey]: updatedPlayer,
-            currentPlayer: nextPlayer,
-            round: prev.round + (extraTurn ? 0 : 1),
-            lastDice: val,
-            rolling: false,
-            log: [...prev.log, { msg: logMsg, player: logPlayer }].slice(-25),
-          };
-        });
+        setDiceDisp(DICE_FACES[val - 1]);
+        try {
+          await submitRoll(gameDoc.gameId, uid, val);
+          const myType = myRole === 'player1' ? 'p1' : 'p2';
+          addLog(
+            val === 6
+              ? `You rolled 6! Extra turn + goti released 🎉`
+              : `You rolled ${val}`,
+            myType
+          );
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : 'Roll failed';
+          toast.error(msg);
+        }
+        setRolling(false);
       }
     }, 80);
-  }, [gs]);
+  }, [gameDoc, rolling, uid, myRole]);
 
-  const formatTime = (secs: number) => {
-    const m = Math.floor(secs / 60).toString().padStart(2, '0');
-    const s = (secs % 60).toString().padStart(2, '0');
-    return `${m}:${s}`;
+  const doForfeit = async () => {
+    if (!gameDoc) return;
+    try {
+      await forfeitGame(gameDoc.gameId, uid);
+      toast.error('You forfeited the match.');
+    } catch {}
   };
 
-  const resetToLobby = () => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    setGs(null);
-    setPhase('lobby');
+  const formatTime = (s: number) =>
+    `${Math.floor(s / 60).toString().padStart(2,'0')}:${(s % 60).toString().padStart(2,'0')}`;
+
+  const balance  = userProfile?.walletBalance ?? 0;
+  const prize    = Math.floor(entryFee * 2 * 0.95);
+  const isMyTurn = gameDoc?.currentTurn === uid;
+  const timerWarn = (gameDoc?.timeLeft ?? 999) <= 30;
+  const opponentName = gameDoc
+    ? (myRole === 'player1' ? gameDoc.player2?.name : gameDoc.player1.name) ?? 'Opponent'
+    : 'Opponent';
+
+  // ── Determine winner info for game over screen ─────────────────────────────
+  const getResultInfo = () => {
+    if (!gameDoc) return null;
+    const myPlayer   = myRole === 'player1' ? gameDoc.player1 : gameDoc.player2!;
+    const oppPlayer  = myRole === 'player1' ? gameDoc.player2! : gameDoc.player1;
+    const iWon       = gameDoc.winnerId === uid;
+    const isDraw     = gameDoc.winnerId === null;
+    return { myPlayer, oppPlayer, iWon, isDraw, prize: gameDoc.prizePool };
   };
 
-  // ── LOBBY ──────────────────────────────────────────────────────────────────
-  if (phase === 'lobby') {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-[#0D0520] via-[#1A0A2E] to-[#0D0520] flex items-center justify-center p-4">
-        <div className="w-full max-w-md">
-
-          {/* Back */}
-          <button onClick={() => navigate('/games')}
-            className="flex items-center gap-2 text-white/40 hover:text-white/70 transition-colors mb-6 text-sm">
-            <ChevronLeft className="w-4 h-4" /> Back to Games
-          </button>
-
-          {/* Logo */}
-          <div className="text-center mb-8">
-            <h1 className="text-5xl font-black tracking-[6px] text-transparent bg-clip-text"
-              style={{ backgroundImage: 'linear-gradient(135deg, #8B6914, #C8A84B, #F0D080, #C8A84B, #8B6914)', fontFamily: 'Georgia, serif' }}>
-              LUDO
-            </h1>
-            <p className="text-[11px] tracking-[8px] text-yellow-600/60 mt-1">ROYAL BATTLE</p>
-            <div className="flex justify-center gap-3 mt-4">
-              {['⚀','⚂','⚄','⚅'].map((d, i) => (
-                <div key={i} className="w-9 h-9 rounded-lg border border-yellow-700/40 flex items-center justify-center text-xl text-yellow-500/70 bg-yellow-900/10">
-                  {d}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Player inputs */}
-          <div className="grid grid-cols-2 gap-3 mb-5">
-            {/* P1 */}
-            <div className="bg-white/[0.04] border border-red-900/40 rounded-2xl p-4">
-              <p className="text-[10px] tracking-[3px] text-red-400/70 mb-3 font-semibold">🔴 PLAYER 1</p>
-              <input
-                value={p1name}
-                onChange={e => setP1name(e.target.value)}
-                maxLength={10}
-                className="w-full bg-black/20 border border-white/10 rounded-xl px-3 py-2 text-white text-sm font-bold text-center outline-none focus:border-red-500/50 transition-colors"
-              />
-              <div className="flex justify-center gap-1.5 mt-3">
-                {[0,1,2,3].map(i => (
-                  <div key={i} className="w-5 h-5 rounded-full border-2 border-red-400/40"
-                    style={{ background: 'radial-gradient(circle at 35% 35%, #FF7675, #D63031, #6B0000)' }} />
-                ))}
-              </div>
-            </div>
-            {/* P2 */}
-            <div className="bg-white/[0.04] border border-blue-900/40 rounded-2xl p-4">
-              <p className="text-[10px] tracking-[3px] text-blue-400/70 mb-3 font-semibold">🔵 PLAYER 2</p>
-              <input
-                value={p2name}
-                onChange={e => setP2name(e.target.value)}
-                maxLength={10}
-                className="w-full bg-black/20 border border-white/10 rounded-xl px-3 py-2 text-white text-sm font-bold text-center outline-none focus:border-blue-500/50 transition-colors"
-              />
-              <div className="flex justify-center gap-1.5 mt-3">
-                {[0,1,2,3].map(i => (
-                  <div key={i} className="w-5 h-5 rounded-full border-2 border-blue-400/40"
-                    style={{ background: 'radial-gradient(circle at 35% 35%, #74B9FF, #0984E3, #003A75)' }} />
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Info strip */}
-          <div className="grid grid-cols-3 gap-2 mb-5">
-            {[
-              { icon: <Clock className="w-4 h-4" />, label: '5 MIN GAME' },
-              { icon: <Trophy className="w-4 h-4" />, label: 'SCORE WINS' },
-              { icon: <Shield className="w-4 h-4" />, label: '2 PLAYERS' },
-            ].map(({ icon, label }) => (
-              <div key={label} className="flex flex-col items-center gap-1 py-2 rounded-xl bg-yellow-900/10 border border-yellow-700/20">
-                <span className="text-yellow-600/70">{icon}</span>
-                <span className="text-[9px] tracking-[1px] text-yellow-600/50 font-semibold">{label}</span>
-              </div>
-            ))}
-          </div>
-
-          {/* Start */}
-          <button onClick={startGame}
-            className="w-full py-4 rounded-2xl font-black text-lg tracking-[4px] text-[#1A0A2E] transition-transform active:scale-95 hover:brightness-110"
-            style={{ background: 'linear-gradient(135deg, #8B6914, #C8A84B, #F0D080, #C8A84B, #8B6914)', fontFamily: 'Georgia, serif' }}>
-            ⚔ START BATTLE ⚔
-          </button>
+  // ════════════════════════════════════════════════════════════════════════════
+  // LOBBY
+  // ════════════════════════════════════════════════════════════════════════════
+  if (uiPhase === 'lobby') return (
+    <div className="space-y-4 pb-4 max-w-2xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <button onClick={() => navigate('/games')} className="p-2 rounded-xl text-white/60 hover:text-white hover:bg-white/5 transition-all">
+          <ChevronLeft className="w-5 h-5" />
+        </button>
+        <div>
+          <h1 className="text-xl font-bold font-sora text-white">🎲 Ludo Battle</h1>
+          <p className="text-xs text-white/40">Real-time 1v1 • Winner takes all</p>
+        </div>
+        <div className="ml-auto flex items-center gap-1.5 text-sm">
+          <Wallet className="w-4 h-4 text-green-400" />
+          <span className="text-green-400 font-bold">₹{balance.toFixed(0)}</span>
         </div>
       </div>
-    );
-  }
 
-  // ── GAME OVER ──────────────────────────────────────────────────────────────
-  if (gs && (gs.phase === 'game_over' || phase === 'game_over')) {
-    const p1wins = gs.p1.score > gs.p2.score;
-    const draw   = gs.p1.score === gs.p2.score;
-    const winner = draw ? null : (p1wins ? gs.p1 : gs.p2);
-    const loser  = draw ? null : (p1wins ? gs.p2 : gs.p1);
+      {/* Hero */}
+      <motion.div initial={{ opacity:0,y:-10 }} animate={{ opacity:1,y:0 }}
+        className="relative overflow-hidden rounded-3xl p-6 bg-gradient-to-r from-blue-900/40 to-purple-900/30 border border-blue-500/20">
+        <div className="absolute right-6 top-1/2 -translate-y-1/2 text-7xl opacity-10 select-none">🎲</div>
+        <h2 className="text-xl font-bold text-white font-sora">Win Real Cash in Ludo!</h2>
+        <p className="text-white/50 text-sm mt-1">Beat a random opponent. Highest dice score in 5 min wins!</p>
+        <div className="flex items-center gap-4 mt-3 text-xs text-white/40">
+          <span className="flex items-center gap-1"><Users className="w-3 h-3" /> 8,234 online</span>
+          <span className="flex items-center gap-1"><Shield className="w-3 h-3 text-green-400" /> Fair play</span>
+          <span className="flex items-center gap-1"><Zap className="w-3 h-3 text-yellow-400" /> Instant payout</span>
+        </div>
+      </motion.div>
 
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-[#0D0520] via-[#1A0A2E] to-[#0D0520] flex items-center justify-center p-4">
-        <div className="w-full max-w-md text-center">
+      {/* Entry fee selector */}
+      <div className="glass rounded-2xl p-5 border border-white/8 space-y-4">
+        <h3 className="font-semibold text-white text-sm">Select Entry Fee</h3>
+        <div className="grid grid-cols-3 gap-2.5">
+          {ENTRY_FEES.map(fee => (
+            <button key={fee} onClick={() => setEntryFee(fee)}
+              className={`py-3 rounded-xl text-sm font-bold transition-all ${
+                entryFee === fee
+                  ? 'bg-purple-500/30 border-2 border-purple-500/60 text-purple-300 shadow-lg shadow-purple-500/20'
+                  : 'bg-white/5 border border-white/10 text-white hover:border-purple-500/30'
+              }`}>
+              ₹{fee}
+            </button>
+          ))}
+        </div>
 
-          {/* Trophy */}
-          <div className="text-7xl mb-3">{draw ? '🤝' : '🏆'}</div>
-          <h2 className="text-4xl font-black tracking-[4px] mb-1"
-            style={{ fontFamily: 'Georgia, serif', color: draw ? '#C8A84B' : (p1wins ? '#FF7675' : '#74B9FF') }}>
-            {draw ? 'DRAW!' : 'VICTORY!'}
-          </h2>
-          <p className="text-sm tracking-[4px] text-white/30 mb-8">
-            {draw ? 'EQUAL SCORES' : `${winner?.name?.toUpperCase()} WINS`}
+        {/* Prize breakdown */}
+        <div className="p-4 rounded-xl bg-green-500/10 border border-green-500/20 space-y-2">
+          <div className="flex justify-between text-sm">
+            <span className="text-white/60">Entry Fee</span>
+            <span className="text-white font-semibold">₹{entryFee}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-white/60">Prize Pool</span>
+            <span className="text-green-400 font-bold">₹{prize}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-white/60">Platform Fee</span>
+            <span className="text-white/40">5%</span>
+          </div>
+        </div>
+
+        {balance < entryFee && (
+          <p className="text-xs text-red-400 text-center">
+            Insufficient balance.{' '}
+            <button onClick={() => navigate('/wallet')} className="text-purple-400 underline">Add Money</button>
           </p>
+        )}
 
-          {/* Result cards */}
-          <div className="grid grid-cols-2 gap-3 mb-8">
-            {[gs.p1, gs.p2].map((p, i) => {
-              const isWinner = !draw && ((i === 0 && p1wins) || (i === 1 && !p1wins));
-              const color = i === 0 ? '#FF7675' : '#74B9FF';
-              const borderColor = i === 0 ? 'border-red-500/40' : 'border-blue-500/40';
-              return (
-                <div key={i}
-                  className={`rounded-2xl p-5 border-2 ${isWinner ? (i===0?'border-red-400':'border-blue-400') : borderColor} bg-white/[0.04]`}>
-                  {isWinner && <div className="text-xs tracking-[3px] font-bold mb-2" style={{ color }}>👑 WINNER</div>}
-                  <div className="text-xs tracking-[2px] mb-1" style={{ color, opacity: 0.7 }}>
-                    {i === 0 ? '🔴' : '🔵'} {i === 0 ? 'PLAYER 1' : 'PLAYER 2'}
-                  </div>
-                  <div className="text-lg font-bold text-white mb-2">{p.name}</div>
-                  <div className="text-4xl font-black mb-1" style={{ color }}>{p.score}</div>
-                  <div className="text-xs text-white/30">SCORE</div>
-                  <div className="mt-2 text-xs text-white/30">{p.rolls} rolls</div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Buttons */}
-          <div className="flex gap-3">
-            <button onClick={resetToLobby}
-              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border border-white/10 text-white/50 hover:text-white hover:border-white/20 transition-colors text-sm font-semibold">
-              <RotateCcw className="w-4 h-4" /> Lobby
-            </button>
-            <button onClick={startGame}
-              className="flex-1 py-3 rounded-xl font-black tracking-[2px] text-sm text-[#1A0A2E] hover:brightness-110 active:scale-95 transition-all"
-              style={{ background: 'linear-gradient(135deg, #8B6914, #C8A84B, #F0D080, #C8A84B, #8B6914)' }}>
-              ⚔ REMATCH
-            </button>
-          </div>
-        </div>
+        <GlowButton fullWidth size="lg" onClick={findMatch} disabled={balance < entryFee}>
+          <Zap className="w-4 h-4" /> Find Opponent — ₹{entryFee}
+        </GlowButton>
       </div>
-    );
-  }
 
-  // ── IN GAME ────────────────────────────────────────────────────────────────
-  if (!gs) return null;
+      {/* How to win */}
+      <div className="glass rounded-2xl p-4 border border-white/8">
+        <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+          <Shield className="w-4 h-4 text-green-400" /> How to Win
+        </h3>
+        <ul className="space-y-1.5 text-xs text-white/50">
+          <li>• Game lasts <span className="text-white/70">5 minutes</span></li>
+          <li>• Roll dice — score adds up each roll</li>
+          <li>• Roll 6 to bring a goti onto the board + extra turn</li>
+          <li>• Highest total score when timer ends <span className="text-green-400 font-semibold">WINS</span></li>
+          <li>• Winner gets <span className="text-green-400 font-semibold">₹{prize}</span></li>
+        </ul>
+      </div>
+    </div>
+  );
 
-  const cp = gs.currentPlayer;
-  const currentName = cp === 1 ? gs.p1.name : gs.p2.name;
-  const timerWarn = gs.timeLeft <= 30;
-  const canRoll = !gs.rolling && gs.phase === 'in_game';
+  // ════════════════════════════════════════════════════════════════════════════
+  // MATCHMAKING
+  // ════════════════════════════════════════════════════════════════════════════
+  if (uiPhase === 'matchmaking') return (
+    <div className="min-h-[60vh] flex flex-col items-center justify-center gap-6 p-4">
+      <motion.div
+        animate={{ scale: [1, 1.08, 1] }}
+        transition={{ repeat: Infinity, duration: 1.5 }}
+        className="relative w-32 h-32">
+        <div className="absolute inset-0 rounded-full border-4 border-purple-500/30 animate-ping" />
+        <div className="w-32 h-32 rounded-full bg-gradient-to-br from-purple-500/30 to-cyan-500/20 flex items-center justify-center text-5xl">
+          🎲
+        </div>
+      </motion.div>
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-[#0D0520] via-[#1A0A2E] to-[#0D0520] p-3">
-      <div className="max-w-2xl mx-auto space-y-3">
+      <div className="text-center">
+        <h2 className="text-2xl font-bold font-sora text-white">Finding Opponent...</h2>
+        <p className="text-white/40 mt-1">Entry: ₹{entryFee} • Prize: ₹{prize}</p>
+        <p className="text-white/25 text-sm mt-2">Waiting {mmSeconds}s...</p>
+      </div>
 
-        {/* Header */}
-        <div className="flex items-center gap-3">
-          <button onClick={resetToLobby}
-            className="p-2 rounded-xl text-white/40 hover:text-white hover:bg-white/5 transition-all">
-            <ChevronLeft className="w-5 h-5" />
-          </button>
-          <div>
-            <h1 className="text-lg font-black tracking-[3px] text-yellow-500/90" style={{ fontFamily: 'Georgia, serif' }}>
-              🎲 LUDO ROYAL
-            </h1>
-            <p className="text-[10px] tracking-[2px] text-white/25">2 PLAYER BATTLE</p>
-          </div>
+      <div className="flex items-center gap-2 text-sm text-white/30">
+        <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+        Matching you with a real player
+      </div>
 
-          {/* Timer */}
-          <div className={`ml-auto flex items-center gap-2 px-4 py-2 rounded-xl border font-mono font-black text-xl transition-all ${
-            timerWarn
-              ? 'bg-red-900/30 border-red-500/50 text-red-400 animate-pulse'
-              : 'bg-yellow-900/15 border-yellow-700/30 text-yellow-400'
-          }`}>
-            <Clock className="w-4 h-4" />
-            {formatTime(gs.timeLeft)}
-          </div>
+      <GlowButton variant="ghost" onClick={cancelSearch}>
+        <RotateCcw className="w-4 h-4" /> Cancel Search
+      </GlowButton>
+    </div>
+  );
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // GAME OVER
+  // ════════════════════════════════════════════════════════════════════════════
+  if (uiPhase === 'game_over') {
+    const result = getResultInfo();
+    if (!result) return null;
+    const { myPlayer, oppPlayer, iWon, isDraw } = result;
+
+    return (
+      <div className="max-w-md mx-auto py-10 px-4 text-center space-y-6">
+        <div className="text-7xl">{isDraw ? '🤝' : iWon ? '🏆' : '😔'}</div>
+        <div>
+          <h2 className="text-3xl font-bold font-sora text-white">
+            {isDraw ? 'Draw!' : iWon ? 'You Won!' : 'You Lost!'}
+          </h2>
+          <p className="text-white/40 mt-1">
+            {isDraw ? 'Entry fee refunded (minus 5%)'
+              : iWon ? `₹${result.prize} credited to your wallet!`
+              : 'Better luck next time!'}
+          </p>
         </div>
 
-        {/* Score Bar */}
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-3">
           {[
-            { p: gs.p1, side: 1, col: '#FF7675', border: cp===1 ? 'border-red-500' : 'border-red-900/30' },
-            { p: gs.p2, side: 2, col: '#74B9FF', border: cp===2 ? 'border-blue-500' : 'border-blue-900/30' },
-          ].map(({ p, side, col, border }) => (
-            <div key={side}
-              className={`flex items-center justify-between px-4 py-3 rounded-2xl bg-white/[0.04] border-2 transition-all ${border}`}>
-              <div>
-                <p className="text-[9px] tracking-[2px] font-bold mb-0.5" style={{ color, opacity: 0.65 }}>
-                  {side === 1 ? '🔴' : '🔵'} {side === 1 ? 'PLAYER 1' : 'PLAYER 2'}
-                  {cp === side && <span className="ml-2 text-yellow-400">▶</span>}
-                </p>
-                <p className="text-sm font-bold text-white leading-tight">{p.name}</p>
-                <p className="text-[10px] text-white/25">{p.rolls} rolls</p>
-              </div>
-              <div className="text-right">
-                <div className="text-3xl font-black" style={{ color }}>{p.score}</div>
-                <div className="text-[9px] tracking-[1px] text-white/25">SCORE</div>
-              </div>
+            { p: myPlayer, label: 'You', isWinner: iWon || (isDraw), borderClass: 'border-purple-500/40' },
+            { p: oppPlayer, label: opponentName, isWinner: !iWon && !isDraw, borderClass: 'border-white/10' },
+          ].map(({ p, label, isWinner, borderClass }) => (
+            <div key={label} className={`glass rounded-2xl p-5 border-2 ${isWinner && !isDraw ? 'border-yellow-500/50' : borderClass}`}>
+              {isWinner && !isDraw && <div className="text-xs text-yellow-400 font-bold tracking-widest mb-2">👑 WINNER</div>}
+              <div className="text-sm text-white/50 mb-1">{label}</div>
+              <div className="text-3xl font-black text-white">{p.score}</div>
+              <div className="text-xs text-white/30 mt-1">{p.rolls} rolls</div>
             </div>
           ))}
         </div>
 
-        {/* Board + Controls */}
-        <div className="flex gap-3 items-start">
-          {/* Canvas Board */}
-          <div className="flex-shrink-0">
-            <canvas
-              ref={canvasRef}
-              width={340}
-              height={340}
-              className="rounded-2xl border border-yellow-700/25"
-              style={{ width: '100%', maxWidth: 340, aspectRatio: '1' }}
-            />
+        <div className="flex gap-3 justify-center">
+          <GlowButton variant="ghost" onClick={() => { setGameDoc(null); setUiPhase('lobby'); }}>
+            Back to Lobby
+          </GlowButton>
+          <GlowButton onClick={() => { setGameDoc(null); settledRef.current = false; setUiPhase('lobby'); setTimeout(findMatch, 100); }}>
+            <Trophy className="w-4 h-4" /> Play Again
+          </GlowButton>
+        </div>
+      </div>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // IN GAME
+  // ════════════════════════════════════════════════════════════════════════════
+  if (!gameDoc) return (
+    <div className="flex items-center justify-center min-h-[60vh]">
+      <div className="text-center space-y-3">
+        <div className="spin-loader w-10 h-10 mx-auto" />
+        <p className="text-white/40 text-sm">Loading game...</p>
+      </div>
+    </div>
+  );
+
+  const myPlayer  = myRole === 'player1' ? gameDoc.player1 : gameDoc.player2!;
+  const oppPlayer = myRole === 'player1' ? gameDoc.player2! : gameDoc.player1;
+
+  return (
+    <div className="space-y-3 pb-4 max-w-4xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <button onClick={() => navigate('/games')} className="p-2 rounded-xl text-white/60 hover:text-white hover:bg-white/5 transition-all">
+          <ChevronLeft className="w-5 h-5" />
+        </button>
+        <div>
+          <h1 className="text-lg font-bold font-sora text-white">🎲 Ludo Battle</h1>
+          <p className="text-xs text-white/40">
+            Prize: <span className="text-green-400 font-bold">₹{gameDoc.prizePool}</span>
+          </p>
+        </div>
+
+        {/* Timer */}
+        <div className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-xl border font-mono font-bold text-lg transition-all ${
+          timerWarn ? 'bg-red-900/30 border-red-500/50 text-red-400 animate-pulse'
+                    : 'bg-yellow-900/10 border-yellow-700/25 text-yellow-400'
+        }`}>
+          <Clock className="w-4 h-4" />
+          {formatTime(gameDoc.timeLeft)}
+        </div>
+      </div>
+
+      {/* Score bar */}
+      <div className="grid grid-cols-2 gap-2">
+        {[
+          { p: myPlayer,  label: 'You',         isActive: isMyTurn,  col:'#FF7675', border: isMyTurn  ? 'border-red-500'  : 'border-red-900/30'  },
+          { p: oppPlayer, label: opponentName,   isActive: !isMyTurn, col:'#74B9FF', border: !isMyTurn ? 'border-blue-500' : 'border-blue-900/30' },
+        ].map(({ p, label, isActive, col, border }) => (
+          <div key={label} className={`flex items-center justify-between px-4 py-3 glass rounded-2xl border-2 transition-all ${border}`}>
+            <div>
+              <p className="text-[9px] tracking-widest font-bold mb-0.5" style={{ color: col, opacity: 0.65 }}>
+                {label.toUpperCase()}
+                {isActive && <span className="ml-1 text-yellow-400">▶</span>}
+              </p>
+              <p className="text-sm font-bold text-white">{p?.name ?? '...'}</p>
+              <p className="text-[10px] text-white/25">{p?.rolls ?? 0} rolls</p>
+            </div>
+            <div className="text-3xl font-black" style={{ color: col }}>{p?.score ?? 0}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Board + controls */}
+      <div className="grid lg:grid-cols-3 gap-3">
+
+        {/* Board */}
+        <div className="lg:col-span-2 glass rounded-2xl p-4 border border-white/8">
+          <canvas
+            ref={canvasRef}
+            width={320} height={320}
+            className="w-full rounded-xl"
+            style={{ aspectRatio: '1' }}
+          />
+        </div>
+
+        {/* Right panel */}
+        <div className="space-y-3">
+
+          {/* Dice */}
+          <div className="glass rounded-2xl p-4 border border-white/8 text-center space-y-3">
+            <p className="text-[9px] tracking-[3px] text-white/30">
+              {isMyTurn ? '▶ YOUR TURN' : '⏳ WAIT'}
+            </p>
+
+            <motion.button
+              onClick={rollDice}
+              disabled={rolling || !isMyTurn}
+              whileTap={{ scale: 0.88 }}
+              animate={rolling ? { rotate: 360 } : { rotate: 0 }}
+              transition={rolling ? { repeat: Infinity, duration: 0.4, ease:'linear' } : {}}
+              className={`w-20 h-20 mx-auto rounded-2xl text-5xl font-bold border-2 transition-all flex items-center justify-center ${
+                isMyTurn && !rolling
+                  ? 'border-purple-500/60 bg-purple-500/15 hover:bg-purple-500/25 cursor-pointer text-yellow-400'
+                  : 'border-white/10 bg-white/5 cursor-not-allowed opacity-40 text-white/40'
+              }`}>
+              {diceDisp}
+            </motion.button>
+
+            <p className="text-xs text-white/30">
+              {rolling ? 'Rolling...' : isMyTurn ? 'Tap to roll!' : `${oppPlayer?.name ?? 'Opponent'}'s turn`}
+            </p>
+            {gameDoc.lastDice > 0 && (
+              <p className="text-xs text-white/25">
+                Last roll: {DICE_FACES[gameDoc.lastDice - 1]} {gameDoc.lastDice}
+              </p>
+            )}
           </div>
 
-          {/* Right Panel */}
-          <div className="flex flex-col gap-3 flex-1 min-w-0">
+          {/* Round */}
+          <div className="glass rounded-xl px-4 py-2.5 border border-white/5 flex justify-between items-center">
+            <span className="text-[9px] tracking-widest text-white/25">ROUND</span>
+            <span className="font-bold text-yellow-500/80">{gameDoc.player1.rolls + (gameDoc.player2?.rolls ?? 0)}</span>
+          </div>
 
-            {/* Turn + Dice */}
-            <div className="bg-white/[0.04] border border-yellow-700/20 rounded-2xl p-4 text-center">
-              <p className="text-[9px] tracking-[3px] text-white/25 mb-1">CURRENT TURN</p>
-              <p className="text-sm font-black mb-3 truncate"
-                style={{ color: cp === 1 ? '#FF7675' : '#74B9FF' }}>
-                {currentName}
-              </p>
-
-              {/* Dice Button */}
-              <button
-                onClick={rollDice}
-                disabled={!canRoll}
-                className={`w-16 h-16 rounded-2xl text-4xl mx-auto block mb-3 border-2 transition-all font-bold ${
-                  canRoll
-                    ? 'border-yellow-600/50 bg-yellow-900/15 hover:bg-yellow-900/30 active:scale-90 cursor-pointer text-yellow-400'
-                    : 'border-white/10 bg-white/5 cursor-not-allowed opacity-35 text-white/40'
-                } ${gs.rolling ? 'animate-spin' : ''}`}>
-                {diceDisplay}
-              </button>
-
-              <p className="text-[10px] text-white/30">
-                {gs.rolling ? 'Rolling...' : canRoll ? 'Tap to roll!' : 'Wait...'}
-              </p>
-              {gs.lastDice > 0 && !gs.rolling && (
-                <p className="text-xs font-bold mt-1" style={{ color: cp === 1 ? '#74B9FF' : '#FF7675' }}>
-                  Last: {DICE_FACES[gs.lastDice - 1]} {gs.lastDice}
-                </p>
-              )}
-            </div>
-
-            {/* Round */}
-            <div className="bg-white/[0.04] border border-white/5 rounded-xl px-3 py-2 flex items-center justify-between">
-              <span className="text-[9px] tracking-[2px] text-white/25">ROUND</span>
-              <span className="text-lg font-black text-yellow-500/80">{gs.round}</span>
-            </div>
-
-            {/* Log */}
-            <div
-              ref={logRef}
-              className="bg-black/25 border border-white/5 rounded-xl p-3 overflow-y-auto flex flex-col gap-1"
-              style={{ maxHeight: 130 }}>
-              {gs.log.map((entry, i) => (
-                <p key={i}
+          {/* Log */}
+          <div ref={logRef} className="glass rounded-xl p-3 border border-white/5 overflow-y-auto space-y-1" style={{ maxHeight: 120 }}>
+            <AnimatePresence>
+              {log.map((entry, i) => (
+                <motion.p
+                  key={i}
+                  initial={{ opacity: 0, x: -6 }}
+                  animate={{ opacity: 1, x: 0 }}
                   className={`text-[11px] leading-tight ${
-                    i === gs.log.length - 1
-                      ? entry.player === 1 ? 'text-red-400/90 font-semibold'
-                        : entry.player === 2 ? 'text-blue-400/90 font-semibold'
+                    i === log.length - 1
+                      ? entry.type === 'p1' ? 'text-red-400/90 font-semibold'
+                        : entry.type === 'p2' ? 'text-blue-400/90 font-semibold'
                         : 'text-yellow-500/80 font-semibold'
                       : 'text-white/25'
                   }`}>
                   {entry.msg}
-                </p>
+                </motion.p>
               ))}
-            </div>
-
-            {/* Forfeit */}
-            <button
-              onClick={() => { setGs(prev => prev ? { ...prev, phase: 'game_over' } : prev); toast.error('Match forfeited'); }}
-              className="w-full py-2 rounded-xl text-[11px] tracking-[2px] text-red-400/50 border border-red-900/30 hover:border-red-500/40 hover:text-red-400/70 transition-all font-semibold">
-              FORFEIT
-            </button>
+            </AnimatePresence>
           </div>
-        </div>
 
+          {/* Forfeit */}
+          <button onClick={doForfeit}
+            className="w-full py-2 rounded-xl text-[11px] tracking-widest text-red-400/40 border border-red-900/20 hover:border-red-500/30 hover:text-red-400/60 transition-all font-semibold">
+            FORFEIT MATCH
+          </button>
+        </div>
       </div>
     </div>
   );
