@@ -1,16 +1,15 @@
 // src/services/ludoService.ts
-// Drop-in Firebase service for Ludo online matchmaking + wallet
 
 import {
   doc, collection, getDoc, setDoc, updateDoc,
   onSnapshot, runTransaction, serverTimestamp,
-  query, where, getDocs, deleteDoc,
+  query, where, getDocs, deleteDoc, Timestamp, // ← FIX 1: added Timestamp
 } from 'firebase/firestore';
-import { db } from '../firebase/config'; // ← your existing config path
+import { db } from '../firebase/config';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type GotiPos = [number, number, number, number]; // -1=home, 0..51=board
+export type GotiPos = [number, number, number, number];
 
 export interface LudoPlayer {
   uid: string;
@@ -26,26 +25,25 @@ export interface LudoGameDoc {
   entryFee: number;
   prizePool: number;
   status: 'in_progress' | 'finished';
-  currentTurn: string;        // uid of player whose turn it is
-  player1: LudoPlayer;        // created the game
-  player2: LudoPlayer | null; // joined the game
+  currentTurn: string;
+  player1: LudoPlayer;
+  player2: LudoPlayer | null;
   lastDice: number;
   timeLeft: number;
   winnerId: string | null;
   prizeSettled: boolean;
   createdAt: unknown;
   startedAt: unknown;
-  finishedAt: unknown;
+  finishedAt: unknown | null; // ← FIX 3: allow null
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const PLATFORM_CUT = 0.05;   // 5% platform fee
-const GAME_DURATION = 300;   // 5 minutes
+const PLATFORM_CUT = 0.05;
+const GAME_DURATION = 300;
 
 // ─── Wallet Helpers ───────────────────────────────────────────────────────────
 
-// Deduct entry fee — uses Firestore transaction to prevent race conditions
 export async function deductWallet(uid: string, amount: number, gameId: string): Promise<void> {
   const userRef = doc(db, 'users', uid);
   const txRef   = doc(collection(db, 'transactions'));
@@ -68,7 +66,6 @@ export async function deductWallet(uid: string, amount: number, gameId: string):
   });
 }
 
-// Credit prize to winner
 export async function creditWallet(uid: string, amount: number, gameId: string, type = 'game_win'): Promise<void> {
   const userRef = doc(db, 'users', uid);
   const txRef   = doc(collection(db, 'transactions'));
@@ -80,30 +77,27 @@ export async function creditWallet(uid: string, amount: number, gameId: string, 
 
     tx.update(userRef, { walletBalance: Number(balance) + Number(amount) });
     tx.set(txRef, {
-  userId: uid,
-  amount,
-  type,
-  gameId,
-  description:
-    type === 'game_win'
-      ? `Ludo prize ₹${amount}`
-      : `Ludo refund ₹${amount}`,
-  createdAt: Timestamp.now(),
-});
+      userId: uid,
+      amount,
+      type,
+      gameId,
+      description:
+        type === 'game_win'
+          ? `Ludo prize ₹${amount}`
+          : `Ludo refund ₹${amount}`,
+      createdAt: serverTimestamp(), // ← FIX 2: was Timestamp.now(), now consistent
+    });
   });
 }
 
 // ─── Matchmaking ──────────────────────────────────────────────────────────────
 
-// Join queue — if someone is already waiting, create the game immediately
-// Returns: { gameId, role: 'player1' | 'player2' }
 export async function joinMatchmaking(
   uid: string,
   name: string,
   entryFee: number
 ): Promise<{ gameId: string; role: 'player1' | 'player2' }> {
 
-  // Look for a waiting player with the same entry fee (not yourself, not stale >60s)
   const mmQuery = query(
     collection(db, 'matchmaking'),
     where('entryFee', '==', entryFee)
@@ -119,13 +113,11 @@ export async function joinMatchmaking(
   });
 
   if (waiting.length > 0) {
-    // ── Match found ──
     const opponentDoc = waiting[0];
     const opponent    = opponentDoc.data();
     const gameId      = doc(collection(db, 'games')).id;
     const prize       = Math.floor(entryFee * 2 * (1 - PLATFORM_CUT));
 
-    // Deduct fees from both
     await deductWallet(opponent.uid, entryFee, gameId);
     await deductWallet(uid, entryFee, gameId);
 
@@ -141,7 +133,7 @@ export async function joinMatchmaking(
     const gameData: LudoGameDoc = {
       gameId, entryFee, prizePool: prize,
       status: 'in_progress',
-      currentTurn: opponent.uid,  // player1 goes first
+      currentTurn: opponent.uid,
       player1: p1, player2: p2,
       lastDice: 0, timeLeft: GAME_DURATION,
       winnerId: null, prizeSettled: false,
@@ -151,13 +143,11 @@ export async function joinMatchmaking(
     };
 
     await setDoc(doc(db, 'games', gameId), gameData);
-    await deleteDoc(opponentDoc.ref); // remove opponent from queue
+    await deleteDoc(opponentDoc.ref);
 
     return { gameId, role: 'player2' };
 
   } else {
-    // ── No opponent yet — join queue ──
-    // Deduct fee now; refund if no match in 60s (handled by cancelMatchmaking)
     const placeholderGameId = doc(collection(db, 'games')).id;
     await deductWallet(uid, entryFee, placeholderGameId);
 
@@ -171,7 +161,6 @@ export async function joinMatchmaking(
   }
 }
 
-// Cancel matchmaking and refund
 export async function cancelMatchmaking(uid: string, entryFee: number): Promise<void> {
   const ref  = doc(db, 'matchmaking', uid);
   const snap = await getDoc(ref);
@@ -181,7 +170,6 @@ export async function cancelMatchmaking(uid: string, entryFee: number): Promise<
   await creditWallet(uid, entryFee, placeholderGameId, 'game_refund');
 }
 
-// Listen until this uid appears in an in_progress game as player1 or player2
 export function listenForMatch(
   uid: string,
   onMatched: (gameId: string, role: 'player1' | 'player2') => void
@@ -208,7 +196,6 @@ export function listenToGame(gameId: string, onUpdate: (g: LudoGameDoc) => void)
   });
 }
 
-// Submit dice roll — only currentTurn player can call this
 export async function submitRoll(gameId: string, uid: string, diceVal: number): Promise<void> {
   await runTransaction(db, async (tx) => {
     const ref  = doc(db, 'games', gameId);
@@ -227,7 +214,6 @@ export async function submitRoll(gameId: string, uid: string, diceVal: number): 
     player.score += diceVal;
     player.rolls += 1;
 
-    // Move goti: 6 brings one home piece out, else advance first active piece
     const activeIdx = gotiPos.findIndex(p => p >= 0);
     const homeIdx   = gotiPos.findIndex(p => p === -1);
 
@@ -238,9 +224,9 @@ export async function submitRoll(gameId: string, uid: string, diceVal: number): 
     }
     player.gotiPos = gotiPos;
 
-    const extraTurn  = diceVal === 6;
-    const opponent   = isP1 ? game.player2! : game.player1;
-    const nextTurn   = extraTurn ? uid : opponent.uid;
+    const extraTurn = diceVal === 6;
+    const opponent  = isP1 ? game.player2! : game.player1;
+    const nextTurn  = extraTurn ? uid : opponent.uid;
 
     tx.update(ref, {
       [pKey]: player,
@@ -250,7 +236,6 @@ export async function submitRoll(gameId: string, uid: string, diceVal: number): 
   });
 }
 
-// Tick timer — called by BOTH clients every second, safe to call concurrently
 export async function tickTimer(gameId: string): Promise<void> {
   await runTransaction(db, async (tx) => {
     const ref  = doc(db, 'games', gameId);
@@ -265,9 +250,10 @@ export async function tickTimer(gameId: string): Promise<void> {
     if (newTime === 0) {
       const p1s = game.player1.score;
       const p2s = game.player2?.score ?? 0;
+      // ← FIX 4: guard draw case — only assign winner if player2 exists
       const winnerId = p1s > p2s ? game.player1.uid
-                     : p2s > p1s ? game.player2!.uid
-                     : null; // draw
+                     : p2s > p1s && game.player2 ? game.player2.uid
+                     : null;
       tx.update(ref, { timeLeft: 0, status: 'finished', winnerId, finishedAt: serverTimestamp() });
     } else {
       tx.update(ref, { timeLeft: newTime });
@@ -275,7 +261,6 @@ export async function tickTimer(gameId: string): Promise<void> {
   });
 }
 
-// Forfeit — opponent wins instantly
 export async function forfeitGame(gameId: string, uid: string): Promise<void> {
   await runTransaction(db, async (tx) => {
     const ref  = doc(db, 'games', gameId);
@@ -288,17 +273,13 @@ export async function forfeitGame(gameId: string, uid: string): Promise<void> {
   });
 }
 
-// Settle prize — call once when game finishes
-// ⚠️  Move to Firebase Cloud Function in production for security
 export async function settlePrize(game: LudoGameDoc): Promise<void> {
   if (game.prizeSettled) return;
-  // Mark settled first (idempotency guard)
   await updateDoc(doc(db, 'games', game.gameId), { prizeSettled: true });
 
   if (game.winnerId) {
     await creditWallet(game.winnerId, game.prizePool, game.gameId, 'game_win');
   } else {
-    // Draw — refund both minus platform cut
     const refAmt = Math.floor(game.entryFee * (1 - PLATFORM_CUT));
     await creditWallet(game.player1.uid, refAmt, game.gameId, 'game_refund');
     if (game.player2) await creditWallet(game.player2.uid, refAmt, game.gameId, 'game_refund');
