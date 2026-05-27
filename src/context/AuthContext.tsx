@@ -32,35 +32,29 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const fetchUserProfile = async (uid: string) => {
     try {
       const userDoc = await getDoc(doc(db, 'users', uid));
-      if (userDoc.exists()) {
-        setUserProfile(userDoc.data() as User);
-      }
-    } catch {
-      // Demo mode - create mock profile
-      const mockProfile: User = {
+     const fetchUserProfile = async (uid: string) => {
+  try {
+    const userRef = doc(db, 'users', uid);
+    const userDoc = await getDoc(userRef);
+
+    if (userDoc.exists()) {
+      const data = userDoc.data();
+
+      setUserProfile({
         uid,
-        email: 'demo@royalwin.com',
-        username: 'DemoPlayer',
-        displayName: 'Demo Player',
-        photoURL: '',
-        role: 'user',
-        referralCode: 'DEMO123',
-        walletBalance: 1250.00,
-        winningBalance: 750.00,
-        depositBalance: 500.00,
-        bonusBalance: 100.00,
-        referralEarnings: 150.00,
-        lockedBalance: 0,
-        totalPoints: 8500,
-        totalMatches: 47,
-        accountStatus: 'active',
-        joinDate: new Date().toISOString(),
-        lastActive: new Date().toISOString(),
-        achievements: ['first_win', 'referral_king'],
-      };
-      setUserProfile(mockProfile);
+        ...data,
+      } as User);
+
+    } else {
+      console.log('User profile not found in Firestore');
+      setUserProfile(null);
     }
-  };
+
+  } catch (error) {
+    console.error('Fetch profile error:', error);
+    setUserProfile(null);
+  }
+};
 
   const refreshProfile = async () => {
     if (currentUser) {
