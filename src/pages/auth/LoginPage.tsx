@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { auth } from '../../firebase/config';
 import toast from 'react-hot-toast';
-import { Eye, EyeOff, Crown, Mail, Lock, Zap } from 'lucide-react';
+import { Eye, EyeOff, Crown, Mail, Lock } from 'lucide-react';
 import { GlowButton } from '../../components/ui/GlowButton';
 
 export const LoginPage = () => {
@@ -25,21 +25,18 @@ export const LoginPage = () => {
       navigate('/dashboard');
     } catch (err: unknown) {
       const error = err as { code?: string };
-      if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found') {
+      if (
+        error.code === 'auth/invalid-credential' ||
+        error.code === 'auth/user-not-found' ||
+        error.code === 'auth/wrong-password'
+      ) {
         toast.error('Invalid email or password');
       } else if (error.code === 'auth/too-many-requests') {
         toast.error('Too many attempts. Try again later.');
+      } else if (error.code === 'auth/network-request-failed') {
+        toast.error('Network error. Check your connection.');
       } else {
-        // Demo mode - allow demo login
-        if (email === 'demo@royalwin.com' && password === 'demo123') {
-          toast.success('Welcome to RoyalWin! 🎮 (Demo Mode)');
-          navigate('/dashboard');
-        } else if (email === 'admin@royalwin.com' && password === 'admin123') {
-          toast.success('Admin access granted! 🛡️ (Demo Mode)');
-          navigate('/admin');
-        } else {
-          toast.error('Login failed. Use demo@royalwin.com / demo123');
-        }
+        toast.error('Login failed. Please try again.');
       }
     } finally {
       setLoading(false);
@@ -54,8 +51,13 @@ export const LoginPage = () => {
       await sendPasswordResetEmail(auth, email);
       toast.success('Password reset email sent!');
       setForgotMode(false);
-    } catch {
-      toast.error('Failed to send reset email');
+    } catch (err: unknown) {
+      const error = err as { code?: string };
+      if (error.code === 'auth/user-not-found') {
+        toast.error('No account found with this email');
+      } else {
+        toast.error('Failed to send reset email. Try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -68,7 +70,6 @@ export const LoginPage = () => {
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl animate-pulse" />
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-pink-500/5 rounded-full blur-3xl" />
-        {/* Grid pattern */}
         <div className="absolute inset-0 opacity-5" style={{
           backgroundImage: 'linear-gradient(rgba(168,85,247,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(168,85,247,0.3) 1px, transparent 1px)',
           backgroundSize: '50px 50px'
@@ -106,14 +107,6 @@ export const LoginPage = () => {
             </p>
           </div>
 
-          {/* Demo credentials hint */}
-          <div className="mb-5 p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/20">
-            <div className="flex items-center gap-2 text-xs text-cyan-400">
-              <Zap className="w-3.5 h-3.5 flex-shrink-0" />
-              <span><strong>Demo:</strong> demo@royalwin.com / demo123 | <strong>Admin:</strong> admin@royalwin.com / admin123</span>
-            </div>
-          </div>
-
           <form onSubmit={forgotMode ? handleForgotPassword : handleLogin} className="space-y-4">
             {/* Email */}
             <div>
@@ -125,6 +118,7 @@ export const LoginPage = () => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="Enter your email"
+                  autoComplete="email"
                   className="input-gaming w-full pl-10 pr-4 py-3 rounded-xl text-sm"
                 />
               </div>
@@ -141,6 +135,7 @@ export const LoginPage = () => {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Enter your password"
+                    autoComplete="current-password"
                     className="input-gaming w-full pl-10 pr-10 py-3 rounded-xl text-sm"
                   />
                   <button
