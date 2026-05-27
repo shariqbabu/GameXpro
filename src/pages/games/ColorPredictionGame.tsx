@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
 import { GlowButton } from '../../components/ui/GlowButton';
+import { generateColorRoundHistory } from '../../utils/mockData';
 import toast from 'react-hot-toast';
 import {
   Clock,
@@ -13,54 +14,29 @@ import {
 
 import { useNavigate } from 'react-router-dom';
 
-import {
-  doc,
-  updateDoc,
-  increment,
-  addDoc,
-  collection,
-  serverTimestamp,
-  onSnapshot,
-  query,
-  orderBy,
-  limit,
-} from 'firebase/firestore';
-
-import { db } from '../../firebase/config';
-
 type ColorChoice =
   | 'red'
   | 'green'
   | 'violet';
 
 interface BetHistory {
-
   round: number;
-
   color: ColorChoice;
-
   amount: number;
-
   result: ColorChoice;
-
   won: boolean;
-
   payout: number;
 }
 
 const MULTIPLIERS = {
-
   red: 2,
-
   green: 2,
-
   violet: 4.5,
 };
 
 const ROUND_DURATION = 30;
 
 const colorConfig = {
-
   red: {
     bg: 'bg-red-500',
     glow: 'shadow-red-500/40',
@@ -94,20 +70,16 @@ const colorConfig = {
 
 export const ColorPredictionGame = () => {
 
-  const navigate =
-    useNavigate();
+  const navigate = useNavigate();
 
   const {
     userProfile,
-    currentUser,
   } = useAuth();
 
   const [
     timer,
     setTimer,
-  ] = useState(
-    ROUND_DURATION
-  );
+  ] = useState(ROUND_DURATION);
 
   const [
     roundNumber,
@@ -142,16 +114,9 @@ export const ColorPredictionGame = () => {
     null
   );
 
-  const [
-    walletData,
-    setWalletData,
-  ] = useState<any>(null);
-
   const balance =
     Number(
-      walletData?.totalBalance ??
-      userProfile?.walletBalance ??
-      0
+      userProfile?.walletBalance ?? 0
     );
 
   const [
@@ -162,7 +127,9 @@ export const ColorPredictionGame = () => {
   const [
     roundHistory,
     setRoundHistory,
-  ] = useState<any[]>([]);
+  ] = useState(
+    generateColorRoundHistory
+  );
 
   const [
     currentBet,
@@ -186,38 +153,6 @@ export const ColorPredictionGame = () => {
     useRef<ReturnType<
       typeof setInterval
     > | null>(null);
-
-  // REALTIME WALLET
-  useEffect(() => {
-
-    if (
-      !currentUser?.uid
-    )
-      return;
-
-    const unsubscribe =
-      onSnapshot(
-        doc(
-          db,
-          'wallets',
-          currentUser.uid
-        ),
-        (snap) => {
-
-          if (
-            snap.exists()
-          ) {
-
-            setWalletData(snap.data()
-            );
-          }
-        }
-      );
-
-    return () =>
-      unsubscribe();
-
-  }, [currentUser]);
 
   // LIVE USERS
   useEffect(() => {
@@ -243,62 +178,27 @@ export const ColorPredictionGame = () => {
 
   }, []);
 
-  // ROUND HISTORY
+  // AUTO ROUND NUMBER
   useEffect(() => {
 
-    const q = query(
-      collection(
-        db,
-        'gameRounds'
-      ),
-      orderBy(
-        'createdAt',
-        'desc'
-      ),
-      limit(20)
-    );
+    if (
+      roundHistory.length > 0
+    ) {
 
-    const unsubscribe =
-      onSnapshot(
-        q,
-        (snapshot) => {
-
-          const data =
-            snapshot.docs.map(
-              (doc) => ({
-                id: doc.id,
-                ...doc.data(),
-              })
-            );
-
-          setRoundHistory(data);
-          
-           // AUTO ROUND NUMBER
-      if (data.length > 0) {
-
-        const latestRound =
-          Number(
-            data[0].roundNumber || 0
-          );
-
-        setRoundNumber(
-          latestRound + 1
+      const latestRound =
+        Number(
+          roundHistory[0]
+            ?.roundNumber || 0
         );
-      }
-        },
-        (error) => {
-          console.error(
-            error
-          );
-        }
-      );
 
-    return () =>
-      unsubscribe();
+      setRoundNumber(
+        latestRound + 1
+      );
+    }
 
   }, []);
 
-  // GAME TIMER
+  // TIMER
   useEffect(() => {
 
     timerRef.current =
@@ -343,7 +243,10 @@ export const ColorPredictionGame = () => {
       }
     };
 
-  }, []);
+  }, [
+    currentBet,
+    roundNumber,
+  ]);
 
   // CLEANUP
   useEffect(() => {
@@ -363,697 +266,344 @@ export const ColorPredictionGame = () => {
   }, []);
 
   // ROUND END
-  const handleRoundEnd =
-    async () => {
+  const handleRoundEnd = () => {
 
-      try {
+    const colors: ColorChoice[] = [
+      'red',
+      'green',
+      'violet',
+      'red',
+      'green',
+      'red',
+      'green',
+    ];
 
-        const colors: ColorChoice[] = [
-          'red',
-          'green',
-          'violet',
-          'red',
-          'green',
-          'red',
-          'green',
-        ];
+    const res =
+      colors[
+        Math.floor(
+          Math.random() *
+            colors.length
+        )
+      ];
 
-        const res =
-          colors[
-            Math.floor(
-              Math.random() *
-                colors.length
-            )
-          ];
+    setResult(res);
 
-        setResult(
-          res
-        );
+    setPhase('result');
 
-        setPhase(
-          'result'
-        );
+    if (currentBet) {
 
-        await addDoc(
-          collection(
-            db,
-            'gameRounds'
-          ),
-          {
-            roundNumber,
-            result: res,
-            totalBets:
-              Math.floor(
-                Math.random() *
-                  50
-              ) + 10,
-            createdAt:
-              serverTimestamp(),
-          }
-        );
+      const won =
+        currentBet.color === res;
 
-        if (
-          currentBet &&
-          currentUser?.uid
-        ) {
-
-          const won =
-            currentBet.color ===
-            res;
-
-          const payout =
-            won
-              ? currentBet.amount *
-                MULTIPLIERS[
-                  currentBet.color
-                ]
-              : 0;
-
-          // WIN
-          if (won) {
-
-            await updateDoc(
-              doc(
-                db,
-                'wallets',
-                currentUser.uid
-              ),
-              {
-                totalBalance:
-                  increment(
-                    payout
-                  ),
-
-                winningBalance:
-                  increment(
-                    payout
-                  ),
-              }
-            );
-
-            await addDoc(
-              collection(
-                db,
-                'transactions'
-              ),
-              {
-                userId:
-                  currentUser.uid,
-
-                type:
-                  'game_win',
-
-                amount:
-                  payout,
-
-                status:
-                  'completed',
-
-                game:
-                  'color_prediction',
-
-                createdAt:
-                  serverTimestamp(),
-              }
-            );
-
-            setShowWinAnim(
-              true
-            );
-
-            toast.success(
-              `🎉 You won ₹${payout.toFixed(
-                0
-              )}!`
-            );
-
-            setTimeout(
-              () => {
-
-                setShowWinAnim(
-                  false
-                );
-
-              },
-              3000
-            );
-
-          } else {
-
-            await addDoc(
-              collection(
-                db,
-                'transactions'
-              ),
-              {
-                userId:
-                  currentUser.uid,
-
-                type:
-                  'game_loss',
-
-                amount:
-                  -currentBet.amount,
-
-                status:
-                  'completed',
-
-                game:
-                  'color_prediction',
-
-                createdAt:
-                  serverTimestamp(),
-              }
-            );
-
-            toast.error(
-              `❌ You lost ₹${currentBet.amount}`
-            );
-          }
-
-          setBetHistory(
-            (prev) => [
-              {
-                round:
-                  roundNumber,
-
-                color:
-                  currentBet.color,
-
-                amount:
-                  currentBet.amount,
-
-                result:
-                  res,
-
-                won,
-
-                payout,
-              },
-
-              ...prev.slice(
-                0,
-                9
-              ),
+      const payout =
+        won
+          ? currentBet.amount *
+            MULTIPLIERS[
+              currentBet.color
             ]
-          );
-        }
+          : 0;
 
-        setTimeout(
-          () => {
+      if (won) {
 
-            setRoundNumber(
-              (prev) =>
-                prev + 1
-            );
-
-            setPhase(
-              'betting'
-            );
-
-            setResult(
-              null
-            );
-
-            setSelectedColor(
-              null
-            );
-
-            setCurrentBet(
-              null
-            );
-
-            setTimer(
-              ROUND_DURATION
-            );
-
-          },
-          3000
-        );
-
-      } catch (
-        error: any
-      ) {
-
-        console.error(
-          'ROUND END ERROR:',
-          error
-        );
-      }
-    };
-
-  // PLACE BET
-  const placeBet =
-    async () => {
-
-      if (
-        !currentUser?.uid
-      ) {
-
-        return toast.error(
-          'Login required'
-        );
-      }
-
-      if (
-        !selectedColor
-      ) {
-
-        return toast.error(
-          'Select a color first!'
-        );
-      }
-
-      if (
-        betAmount <= 0
-      ) {
-
-        return toast.error(
-          'Enter valid bet amount'
-        );
-      }
-
-      if (
-        betAmount >
-        balance
-      ) {
-
-        return toast.error(
-          'Insufficient balance!'
-        );
-      }
-
-      if (
-        phase !==
-        'betting'
-      ) {
-
-        return toast.error(
-          'Betting is closed'
-        );
-      }
-
-      if (
-        currentBet
-      ) {
-
-        return toast.error(
-          'Bet already placed'
-        );
-      }
-
-      try {
-
-        // DEDUCT BALANCE
-        await updateDoc(
-          doc(
-            db,
-            'wallets',
-            currentUser.uid
-          ),
-          {
-            totalBalance:
-              increment(
-                -betAmount
-              ),
-          }
-        );
-
-        // SAVE BET
-        await addDoc(
-          collection(
-            db,
-            'bets'
-          ),
-          {
-            userId:
-              currentUser.uid,
-
-            roundNumber,
-
-            color:
-              selectedColor,
-
-            amount:
-              betAmount,
-
-            status:
-              'pending',
-
-            createdAt:
-              serverTimestamp(),
-          }
-        );
-
-        setCurrentBet({
-          color:
-            selectedColor,
-
-          amount:
-            betAmount,
-        });
+        setShowWinAnim(true);
 
         toast.success(
-          `✅ Bet placed on ${colorConfig[selectedColor].label}`
+          `🎉 You won ₹${payout.toFixed(0)}!`,
+          {
+            duration: 3000,
+          }
         );
 
-      } catch (
-        error: any
-      ) {
+        setTimeout(() => {
 
-        console.error(
-          'PLACE BET ERROR:',
-          error
-        );
+          setShowWinAnim(false);
+
+        }, 3000);
+
+      } else {
 
         toast.error(
-          error?.message ||
-          'Bet failed'
+          `❌ You lost ₹${currentBet.amount}`
         );
       }
-    };
 
-const progressPercent =
-  (
+      setBetHistory(
+        (prev) => [
+          {
+            round: roundNumber,
+            color: currentBet.color,
+            amount: currentBet.amount,
+            result: res,
+            won,
+            payout:
+              won
+                ? payout
+                : 0,
+          },
+
+          ...prev.slice(0, 9),
+        ]
+      );
+    }
+
+    setRoundHistory((prev) => {
+
+      const updated = [
+        {
+          id: `round${roundNumber}`,
+          roundNumber,
+          result: res,
+          totalBets:
+            Math.floor(
+              Math.random() * 50
+            ) + 10,
+        },
+
+        ...prev.slice(0, 19),
+      ];
+
+      return updated;
+    });
+
+    setTimeout(() => {
+
+      setRoundNumber(
+        (prev) =>
+          prev + 1
+      );
+
+      setPhase('betting');
+
+      setResult(null);
+
+      setSelectedColor(null);
+
+      setCurrentBet(null);
+
+    }, 3000);
+  };
+
+  // PLACE BET
+  const placeBet = () => {
+
+    if (!selectedColor)
+      return toast.error(
+        'Select a color first!'
+      );
+
+    if (betAmount <= 0)
+      return toast.error(
+        'Enter valid bet amount'
+      );
+
+    if (betAmount > balance)
+      return toast.error(
+        'Insufficient balance!'
+      );
+
+    if (phase !== 'betting')
+      return toast.error(
+        'Betting is closed for this round'
+      );
+
+    if (currentBet)
+      return toast.error(
+        'Bet already placed for this round'
+      );
+
+    setCurrentBet({
+      color: selectedColor,
+      amount: betAmount,
+    });
+
+    toast.success(
+      `✅ Bet placed! ₹${betAmount} on ${colorConfig[selectedColor].label}`
+    );
+  };
+
+  const progressPercent =
     (
-      ROUND_DURATION -
-      timer
-    ) /
-    ROUND_DURATION
-  ) *
-  100;
+      (
+        ROUND_DURATION -
+        timer
+      ) /
+      ROUND_DURATION
+    ) * 100;
 
-return (
+  return (
+    <div className="space-y-4 pb-4 max-w-4xl mx-auto">
 
-  <div className="min-h-screen bg-[#0a0a0f] text-white p-4">
+      {/* HEADER */}
+      <div className="flex items-center gap-3">
 
-    {/* HEADER */}
-    <div className="flex items-center justify-between mb-6">
-
-      <button
-        onClick={() => navigate(-1)}
-        className="p-2 rounded-xl bg-white/5 border border-white/10"
-      >
-        <ChevronLeft size={22} />
-      </button>
-
-      <div className="text-center">
-
-        <h1 className="text-2xl font-bold">
-          Color Prediction
-        </h1>
-
-        <p className="text-white/50 text-sm">
-          Round #{roundNumber}
-        </p>
-      </div>
-
-      <div className="text-right">
-
-        <p className="text-xs text-white/50">
-          Balance
-        </p>
-
-        <p className="font-bold text-green-400">
-          ₹{balance.toFixed(2)}
-        </p>
-      </div>
-    </div>
-
-    {/* TIMER */}
-    <div className="mb-6">
-
-      <div className="flex items-center justify-between mb-2">
-
-        <div className="flex items-center gap-2 text-sm text-white/60">
-
-          <Clock size={16} />
-
-          <span>
-            {
-              phase === 'betting'
-                ? 'Betting Time'
-                : phase === 'waiting'
-                ? 'Waiting Result'
-                : 'Result'
-            }
-          </span>
-        </div>
-
-        <span className="font-bold text-lg">
-          {timer}s
-        </span>
-      </div>
-
-      <div className="w-full h-3 rounded-full bg-white/10 overflow-hidden">
-
-        <div
-          className="h-full bg-gradient-to-r from-cyan-500 to-violet-500 transition-all duration-1000"
-          style={{
-            width: `${progressPercent}%`,
-          }}
-        />
-      </div>
-    </div>
-
-    {/* COLORS */}
-    <div className="grid grid-cols-3 gap-4 mb-6">
-
-      {(Object.keys(
-        colorConfig
-      ) as ColorChoice[]).map(
-        (color) => {
-
-          const cfg =
-            colorConfig[color];
-
-          return (
-
-            <motion.button
-              key={color}
-              whileTap={{
-                scale: 0.95,
-              }}
-              onClick={() =>
-                setSelectedColor(
-                  color
-                )
-              }
-              className={`
-                p-5 rounded-3xl border
-                ${cfg.border}
-                ${cfg.bg}
-                ${
-                  selectedColor ===
-                  color
-                    ? 'ring-4 ring-white/50 scale-105'
-                    : ''
-                }
-              `}
-            >
-
-              <div className="text-4xl mb-2">
-                {cfg.emoji}
-              </div>
-
-              <div className="font-bold text-lg">
-                {cfg.label}
-              </div>
-
-              <div className="text-sm opacity-80">
-                {cfg.multiplier}
-              </div>
-            </motion.button>
-          );
-        }
-      )}
-    </div>
-
-    {/* BET INPUT */}
-    <div className="mb-6">
-
-      <input
-        type="number"
-        min={10}
-        value={betAmount}
-        onChange={(e) =>
-          setBetAmount(
-            Number(
-              e.target.value
-            )
-          )
-        }
-        className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-4 outline-none"
-        placeholder="Enter Bet Amount"
-      />
-    </div>
-
-    {/* BET BUTTON */}
-    <GlowButton
-      onClick={placeBet}
-      className="w-full mb-6"
-    >
-      Place Bet
-    </GlowButton>
-
-    {/* CURRENT BET */}
-    {currentBet && (
-
-      <div className="mb-6 p-4 rounded-2xl bg-white/5 border border-white/10">
-
-        <p className="text-sm text-white/50 mb-1">
-          Current Bet
-        </p>
-
-        <div className="flex items-center justify-between">
-
-          <span className="font-bold">
-
-            {
-              colorConfig[
-                currentBet.color
-              ].label
-            }
-          </span>
-
-          <span className="text-green-400 font-bold">
-            ₹{currentBet.amount}
-          </span>
-        </div>
-      </div>
-    )}
-
-    {/* RESULT */}
-    <AnimatePresence>
-
-      {result && (
-
-        <motion.div
-          initial={{
-            scale: 0.5,
-            opacity: 0,
-          }}
-          animate={{
-            scale: 1,
-            opacity: 1,
-          }}
-          exit={{
-            scale: 0.5,
-            opacity: 0,
-          }}
-          className="mb-6 text-center"
+        <button
+          onClick={() => navigate('/games')}
+          className="p-2 rounded-xl text-white/60 hover:text-white hover:bg-white/5 transition-all"
         >
+          <ChevronLeft className="w-5 h-5" />
+        </button>
 
-          <div
-            className={`
-              inline-flex items-center justify-center
-              w-32 h-32 rounded-full
-              ${colorConfig[result].bg}
-            `}
-          >
+        <div>
 
-            <span className="text-6xl">
-              {colorConfig[result].emoji}
+          <h1 className="text-xl font-bold font-sora text-white">
+            🎨 Color Prediction
+          </h1>
+
+          <div className="flex items-center gap-3 text-xs text-white/40 mt-0.5">
+
+            <span className="flex items-center gap-1">
+              <Users className="w-3 h-3" />
+              {liveUsers.toLocaleString()} online
+            </span>
+
+            <span className="badge-live">
+              LIVE
             </span>
           </div>
-
-          <h2 className="text-3xl font-bold mt-4">
-            {colorConfig[result].label}
-          </h2>
-        </motion.div>
-      )}
-    </AnimatePresence>
-
-    {/* ROUND HISTORY */}
-    <div className="space-y-3">
-
-      <div className="flex items-center gap-2 mb-3">
-
-        <TrendingUp size={18} />
-
-        <h3 className="font-bold">
-          Recent Results
-        </h3>
+        </div>
       </div>
 
-      <div className="flex gap-2 flex-wrap">
+      {/* WIN ANIMATION */}
+      <AnimatePresence>
 
-        {roundHistory
-          .slice(0, 10)
-          .map((r, i) => (
+        {showWinAnim && (
 
-            <div
-              key={i}
-              className={`
-                w-10 h-10 rounded-full
-                flex items-center justify-center text-lg
-                ${
-                  colorConfig[
-                    r.result as ColorChoice
-                  ]?.bg
+          <motion.div
+            initial={{
+              opacity: 0,
+              scale: 0.5,
+            }}
+            animate={{
+              opacity: 1,
+              scale: 1,
+            }}
+            exit={{
+              opacity: 0,
+              scale: 1.5,
+            }}
+            className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none"
+          >
+
+            <div className="text-center">
+
+              <div className="text-8xl mb-4">
+                🎉
+              </div>
+
+              <div className="text-4xl font-bold text-green-400 font-sora">
+                YOU WON!
+              </div>
+
+              <div className="text-2xl text-white mt-2">
+
+                ₹{
+                  currentBet
+                    ? (
+                        currentBet.amount *
+                        MULTIPLIERS[
+                          currentBet.color
+                        ]
+                      ).toFixed(0)
+                    : 0
                 }
-              `}
-            >
-
-              {
-                colorConfig[
-                  r.result as ColorChoice
-                ]?.emoji
-              }
+              </div>
             </div>
-          ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* MAIN */}
+      <div className="grid lg:grid-cols-3 gap-4">
+
+        {/* LEFT */}
+        <div className="lg:col-span-2 space-y-4">
+
+          {/* TIMER */}
+          <div className="glass rounded-2xl p-5 border border-white/8">
+
+            <div className="flex items-center justify-between mb-4">
+
+              <div>
+
+                <p className="text-xs text-white/40 uppercase tracking-wider">
+                  Round
+                </p>
+
+                <p className="text-2xl font-bold font-sora text-white">
+                  #{roundNumber}
+                </p>
+              </div>
+
+              <div className="text-center">
+
+                <div className={`text-4xl font-bold font-sora ${
+                  timer <= 5
+                    ? 'text-red-400 animate-pulse'
+                    : timer <= 10
+                    ? 'text-yellow-400'
+                    : 'text-white'
+                }`}>
+
+                  {String(
+                    Math.floor(timer / 60)
+                  ).padStart(2, '0')}:
+
+                  {String(
+                    timer % 60
+                  ).padStart(2, '0')}
+                </div>
+
+                <p className="text-xs text-white/40 mt-1">
+
+                  {
+                    phase === 'betting'
+                      ? 'Place your bets'
+                      : phase === 'waiting'
+                      ? 'Bets closed'
+                      : 'Round ended'
+                  }
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+
+                <Clock className="w-4 h-4 text-purple-400" />
+
+                <div className="text-right">
+
+                  <p className="text-xs text-white/40">
+                    Balance
+                  </p>
+
+                  <p className="text-sm font-bold text-green-400">
+                    ₹{balance.toFixed(2)}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* PROGRESS */}
+            <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+
+              <motion.div
+                className={`h-full rounded-full ${
+                  timer <= 5
+                    ? 'bg-red-500'
+                    : timer <= 10
+                    ? 'bg-yellow-500'
+                    : 'bg-gradient-to-r from-purple-500 to-cyan-500'
+                }`}
+                animate={{
+                  width: `${progressPercent}%`,
+                }}
+                transition={{
+                  duration: 0.5,
+                }}
+              />
+            </div>
+          </div>
+        </div>
       </div>
     </div>
-
-    {/* LIVE USERS */}
-    <div className="mt-8 flex items-center justify-center gap-2 text-white/50 text-sm">
-
-      <Users size={16} />
-
-      <span>
-        {liveUsers.toLocaleString()} users online
-      </span>
-    </div>
-
-    {/* WIN POPUP */}
-    <AnimatePresence>
-
-      {showWinAnim && (
-
-        <motion.div
-          initial={{
-            opacity: 0,
-            scale: 0.5,
-          }}
-          animate={{
-            opacity: 1,
-            scale: 1,
-          }}
-          exit={{
-            opacity: 0,
-            scale: 0.5,
-          }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
-        >
-
-          <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-3xl p-10 text-center shadow-2xl">
-
-            <Zap
-              size={60}
-              className="mx-auto mb-4"
-            />
-
-            <h2 className="text-4xl font-black mb-2">
-              YOU WON!
-            </h2>
-
-            <p className="text-lg">
-              Congratulations 🎉
-            </p>
-          </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
-  </div>
-);
+  );
 };
