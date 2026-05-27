@@ -4,7 +4,6 @@ import {
   doc, collection, getDoc, setDoc, updateDoc,
   onSnapshot, runTransaction, serverTimestamp,
   query, where, getDocs, deleteDoc,
-  // Timestamp removed — not needed anymore
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 
@@ -39,19 +38,56 @@ export interface LudoGameDoc {
 const PLATFORM_CUT = 0.05;
 const GAME_DURATION = 300;
 
+// ─── Wallet Helpers ───────────────────────────────────────────────────────────
+
 export async function deductWallet(uid: string, amount: number, gameId: string): Promise<void> {
-  const userRef = doc(db, 'users', uid);
-  const txRef   = doc(collection(db, 'transactions'));
+  const walletRef = doc(db, 'wallets', uid); // ← wallets collection
+  const txRef     = doc(collection(db, 'transactions'));
 
   await runTransaction(db, async (tx) => {
-    const snap = await tx.get(userRef);
-    if (!snap.exists()) throw new Error('User not found');
-    const balance: number = snap.data().walletBalance ?? 0;
-    if (balance < amount) throw new Error('Insufficient balance');
+    const snap = await tx.get(walletRef);
+    if (!snap.exists()) throw new Error('Wallet not found');
 
-    tx.update(userRef, { walletBalance: balance - amount });
+    const data     = snap.data();
+    const winning  = data.winningBalance ?? 0;
+    const deposit  = data.depositBalance ?? 0;
+    const bonus    = data.bonusBalance   ?? 0;
+    const total    = winning + deposit + bonus;
+
+    if (total < amount) throw new Error('Insufficient balance');
+
+    // Deduct priority: deposit → bonus → winning
+    let remaining  = amount;
+    let newDeposit = deposit;
+    let newBonus   = bonus;
+    let newWinning = winning;
+
+    if (newDeposit >= remaining) {
+      newDeposit -= remaining; remaining = 0;
+    } else {
+      remaining -= newDeposit; newDeposit = 0;
+    }
+    if (remaining > 0) {
+      if (newBonus >= remaining) {
+        newBonus -= remaining; remaining = 0;
+      } else {
+        remaining -= newBonus; newBonus = 0;
+      }
+    }
+    if (remaining > 0) {
+      newWinning -= remaining;
+    }
+
+    tx.update(walletRef, {
+      winningBalance: newWinning,
+      depositBalance: newDeposit,
+      bonusBalance:   newBonus,
+      totalBalance:   newWinning + newDeposit + newBonus,
+      updatedAt:      serverTimestamp(),
+    });
+
     tx.set(txRef, {
-      uid,
+      userId: uid,
       amount: -amount,
       type: 'game_entry',
       gameId,
@@ -67,15 +103,27 @@ export async function creditWallet(
   gameId: string,
   type = 'game_win'
 ): Promise<void> {
-  const userRef = doc(db, 'users', uid);
-  const txRef   = doc(collection(db, 'transactions'));
+  const walletRef = doc(db, 'wallets', uid); // ← wallets collection
+  const txRef     = doc(collection(db, 'transactions'));
 
   await runTransaction(db, async (tx) => {
-    const snap = await tx.get(userRef);
-    if (!snap.exists()) throw new Error('User not found');
-    const balance: number = snap.data().walletBalance ?? 0;
+    const snap = await tx.get(walletRef);
+    if (!snap.exists()) throw new Error('Wallet not found');
 
-    tx.update(userRef, { walletBalance: Number(balance) + Number(amount) });
+    const data       = snap.data();
+    const winning    = data.winningBalance ?? 0;
+    const deposit    = data.depositBalance ?? 0;
+    const bonus      = data.bonusBalance   ?? 0;
+
+    // Prize aur refund → winningBalance mein jaata hai
+    const newWinning = winning + amount;
+
+    tx.update(walletRef, {
+      winningBalance: newWinning,
+      totalBalance:   newWinning + deposit + bonus,
+      updatedAt:      serverTimestamp(),
+    });
+
     tx.set(txRef, {
       userId: uid,
       amount,
@@ -270,14 +318,11 @@ export async function forfeitGame(gameId: string, uid: string): Promise<void> {
   });
 }
 
-// ─── settlePrize — FIXED ─────────────────────────────────────────────────────
-// FIX: Atomic transaction — prizeSettled check + mark + credit ek saath
-// Pehle prizeSettled check karo INSIDE transaction, race condition impossible
+// ─── settlePrize ─────────────────────────────────────────────────────────────
+
 export async function settlePrize(game: LudoGameDoc): Promise<void> {
   const gameRef = doc(db, 'games', game.gameId);
 
-  // Step 1: Atomically claim the right to settle
-  // Agar koi aur pehle settle kar chuka hai, yeh transaction abort ho jaayegi
   let alreadySettled = false;
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(gameRef);
@@ -286,21 +331,18 @@ export async function settlePrize(game: LudoGameDoc): Promise<void> {
 
     if (fresh.prizeSettled) {
       alreadySettled = true;
-      return; // doosre client ne pehle settle kar diya — kuch mat karo
+      return;
     }
 
-    // Mark settled INSIDE transaction — only one client wins this race
     tx.update(gameRef, { prizeSettled: true });
   });
 
   if (alreadySettled) return;
 
-  // Step 2: Credit wallet — ab sirf ek hi client yahaan tak pahuncha hai
   try {
     if (game.winnerId) {
       await creditWallet(game.winnerId, game.prizePool, game.gameId, 'game_win');
     } else {
-      // Draw — dono ko refund (minus platform cut)
       const refAmt = Math.floor(game.entryFee * (1 - PLATFORM_CUT));
       await creditWallet(game.player1.uid, refAmt, game.gameId, 'game_refund');
       if (game.player2) {
@@ -308,8 +350,7 @@ export async function settlePrize(game: LudoGameDoc): Promise<void> {
       }
     }
   } catch (err) {
-    // Credit fail ho gaya — prizeSettled ko wapas false karo taaki retry ho sake
     await updateDoc(gameRef, { prizeSettled: false }).catch(() => {});
-    throw err; // UI ko error dikhao
+    throw err;
   }
 }
