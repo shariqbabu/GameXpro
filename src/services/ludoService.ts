@@ -80,13 +80,16 @@ export async function creditWallet(uid: string, amount: number, gameId: string, 
 
     tx.update(userRef, { walletBalance: balance + amount });
     tx.set(txRef, {
-      uid,
-      amount,
-      type,
-      gameId,
-      description: type === 'game_win' ? `Ludo prize ₹${amount}` : `Ludo refund ₹${amount}`,
-      createdAt: serverTimestamp(),
-    });
+  userId: uid,
+  amount,
+  type,
+  gameId,
+  description:
+    type === 'game_win'
+      ? `Ludo prize ₹${amount}`
+      : `Ludo refund ₹${amount}`,
+  createdAt: serverTimestamp(),
+});
   });
 }
 
