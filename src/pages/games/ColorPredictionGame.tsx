@@ -419,10 +419,9 @@ export const ColorPredictionGame = () => {
   }}
   className={`rounded-2xl p-6 text-center border ${colorConfig[result].border} bg-white/5`}
 >
-  className={`rounded-2xl p-6 text-center border ${colorConfig[result].border} bg-white/5`}
->
+
                 <div className="text-6xl mb-2">{colorConfig[result].emoji}</div>
-                <h3 className="text-2xl font-bold font-sora text-white">{colorConfig[result].label} Wins!</h3>
+                <h3 className="text-2xl font-bold font-sora text-white">{result && colorConfig[result].label} Wins!</h3>
                 {currentBet && (
                   <p className={`text-lg font-bold mt-2 ${currentBet.color === result ? 'text-green-400' : 'text-red-400'}`}>
                     {currentBet.color === result ? `+₹${(currentBet.amount * MULTIPLIERS[currentBet.color]).toFixed(0)}` : `-₹${currentBet.amount}`}
@@ -568,25 +567,38 @@ export const ColorPredictionGame = () => {
               <h3 className="text-sm font-semibold text-white">Live Bets</h3>
             </div>
             <div className="divide-y divide-white/5">
-              {[
-                { user: 'R***j', color: 'red', amount: 500 },
-                { user: 'P***a', color: 'green', amount: 200 },
-                { user: 'A***t', color: 'violet', amount: 1000 },
-                { user: 'N***a', color: 'red', amount: 150 },
-                { user: 'S***n', color: 'green', amount: 300 },
-              ].map((bet, i) => (
-                <motion.div
-                  key={i}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.05 }}
-                  className="flex items-center gap-3 p-3"
-                >
-                  <div className={`w-5 h-5 rounded-full flex-shrink-0 ${colorConfig[bet.color as ColorChoice].bg}`} />
-                  <span className="text-xs text-white/60 flex-1">{bet.user}</span>
-                  <span className="text-xs font-semibold text-white">₹{bet.amount}</span>
-                </motion.div>
-              ))}
+             {[
+  { user: 'R***j', color: 'red', amount: 500 },
+  { user: 'P***a', color: 'green', amount: 200 },
+  { user: 'A***t', color: 'violet', amount: 1000 },
+  { user: 'N***a', color: 'red', amount: 150 },
+  { user: 'S***n', color: 'green', amount: 300 },
+].map((bet, i) => (
+  <div
+    key={i}
+    className="flex items-center justify-between p-3"
+  >
+    <div className="flex items-center gap-2">
+      <div
+        className={`w-3 h-3 rounded-full ${
+          bet.color === 'red'
+            ? 'bg-red-500'
+            : bet.color === 'green'
+            ? 'bg-green-500'
+            : 'bg-violet-500'
+        }`}
+      />
+
+      <span className="text-xs text-white">
+        {bet.user}
+      </span>
+    </div>
+
+    <span className="text-xs font-bold text-green-400">
+      ₹{bet.amount}
+    </span>
+  </div>
+))}
             </div>
           </div>
         </div>
