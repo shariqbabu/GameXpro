@@ -15,7 +15,7 @@ import {
 
 import {
   ProtectedRoute,
-} from './components/ProtectedRoute';
+} from './routes/ProtectedRoute';
 
 import {
   UserLayout,
