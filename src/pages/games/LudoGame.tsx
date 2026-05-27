@@ -184,12 +184,11 @@ export const LudoGame = () => {
 
   // REAL BALANCE
   const balance =
-    Number(
-      walletData?.totalBalance ||
-      walletData?.walletBalance ||
-      userProfile?.walletBalance ||
-      0
-    );
+  Number(
+    walletData?.totalBalance ??
+    userProfile?.walletBalance ??
+    0
+  );
 
   const prize =
     Math.floor(
