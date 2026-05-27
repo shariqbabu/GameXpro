@@ -203,10 +203,24 @@ export const LudoGame = () => {
     settledRef.current = true;
     if (timerRef.current) clearInterval(timerRef.current);
 
-    try {
-      await settlePrize(g);
-      await refreshProfile(); // refresh wallet balance
-    } catch (e) {
+   try {
+
+  await settlePrize(g);
+
+  // wait firestore sync
+  await new Promise(resolve =>
+    setTimeout(resolve, 1500)
+  );
+
+  await refreshProfile();
+
+  toast.success(
+    g.winnerId === uid
+      ? `₹${g.prizePool} added to wallet`
+      : 'Match finished'
+  );
+
+} catch (e) {
       console.error('Prize settle error:', e);
     }
     setUiPhase('game_over');
