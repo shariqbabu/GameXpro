@@ -1,6 +1,8 @@
-The error is in the `handleRoundEnd` function where wallet updates fail. The issue is with the `increment` logic for deducting from sub-balances and the result handling. Let me fix it:
+The error is a **build/syntax error** caused by the code block markers (` ```tsx `) being accidentally included in the file. Let me provide the clean file:
 
 ```tsx
+// src/pages/games/ColorPredictionGame.tsx
+
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
@@ -41,10 +43,26 @@ interface WalletData {
   referralEarnings: number;
 }
 
-const MULTIPLIERS = { red: 2, green: 2, violet: 4.5 };
+const MULTIPLIERS: Record<ColorChoice, number> = {
+  red: 2,
+  green: 2,
+  violet: 4.5,
+};
+
 const ROUND_DURATION = 30;
 
-const colorConfig = {
+const colorConfig: Record<
+  ColorChoice,
+  {
+    bg: string;
+    glow: string;
+    border: string;
+    text: string;
+    label: string;
+    emoji: string;
+    multiplier: string;
+  }
+> = {
   red: {
     bg: 'bg-red-500',
     glow: 'shadow-red-500/40',
@@ -77,6 +95,7 @@ const colorConfig = {
 export const ColorPredictionGame = () => {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
+
   const [timer, setTimer] = useState(ROUND_DURATION);
   const [roundNumber, setRoundNumber] = useState(101);
   const [phase, setPhase] = useState<'betting' | 'waiting' | 'result'>('betting');
@@ -102,15 +121,23 @@ export const ColorPredictionGame = () => {
   const [liveUsers, setLiveUsers] = useState(12481);
   const [placingBet, setPlacingBet] = useState(false);
 
-  // Use refs to avoid stale closures in timer
-  const currentBetRef = useRef(currentBet);
-  const roundNumberRef = useRef(roundNumber);
-  const phaseRef = useRef(phase);
-  const processingRef = useRef(false); // prevent double processing
+  // Refs to avoid stale closures in timer callback
+  const currentBetRef = useRef<{ color: ColorChoice; amount: number } | null>(null);
+  const roundNumberRef = useRef(101);
+  const phaseRef = useRef<'betting' | 'waiting' | 'result'>('betting');
+  const processingRef = useRef(false);
 
-  useEffect(() => { currentBetRef.current = currentBet; }, [currentBet]);
-  useEffect(() => { roundNumberRef.current = roundNumber; }, [roundNumber]);
-  useEffect(() => { phaseRef.current = phase; }, [phase]);
+  useEffect(() => {
+    currentBetRef.current = currentBet;
+  }, [currentBet]);
+
+  useEffect(() => {
+    roundNumberRef.current = roundNumber;
+  }, [roundNumber]);
+
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
 
   // Real-time wallet listener
   useEffect(() => {
@@ -124,7 +151,6 @@ export const ColorPredictionGame = () => {
         if (snap.exists()) {
           setWallet(snap.data() as WalletData);
         } else {
-          // Create default wallet structure if missing
           setWallet({
             totalBalance: 0,
             depositBalance: 0,
@@ -148,63 +174,44 @@ export const ColorPredictionGame = () => {
 
   // Live users simulation
   useEffect(() => {
-    const userInterval = setInterval(() => {
+    const interval = setInterval(() => {
       setLiveUsers((prev) => prev + Math.floor(Math.random() * 10) - 5);
     }, 2000);
-    return () => clearInterval(userInterval);
+    return () => clearInterval(interval);
   }, []);
 
-  // Safe wallet update — fetches fresh data before writing
-  const safeWalletCredit = async (
-    uid: string,
-    amount: number
-  ): Promise<void> => {
+  // Credit winnings to wallet
+  const safeWalletCredit = async (uid: string, amount: number): Promise<void> => {
+    if (amount <= 0) return;
     const walletRef = doc(db, 'wallets', uid);
-
-    // Fetch latest wallet to avoid stale data
     const snap = await getDoc(walletRef);
-    if (!snap.exists()) {
-      throw new Error('Wallet document not found');
-    }
-
+    if (!snap.exists()) throw new Error('Wallet not found');
     await updateDoc(walletRef, {
       winningBalance: increment(amount),
       totalBalance: increment(amount),
     });
   };
 
-  // Safe wallet deduct — priority: depositBalance → winningBalance → bonusBalance
-  const safeWalletDeduct = async (
-    uid: string,
-    amount: number
-  ): Promise<void> => {
+  // Deduct bet from wallet — deposit first, then winning, then bonus
+  const safeWalletDeduct = async (uid: string, amount: number): Promise<void> => {
     const walletRef = doc(db, 'wallets', uid);
     const snap = await getDoc(walletRef);
-
-    if (!snap.exists()) {
-      throw new Error('Wallet document not found');
-    }
+    if (!snap.exists()) throw new Error('Wallet not found');
 
     const data = snap.data() as WalletData;
+    if (data.totalBalance < amount) throw new Error('Insufficient balance');
 
-    if (data.totalBalance < amount) {
-      throw new Error('Insufficient balance');
-    }
-
-    // Calculate how much to deduct from each sub-balance
     let remaining = amount;
     const updates: Record<string, unknown> = {
       totalBalance: increment(-amount),
     };
 
-    // Deduct from depositBalance first
     const fromDeposit = Math.min(remaining, data.depositBalance);
     if (fromDeposit > 0) {
       updates.depositBalance = increment(-fromDeposit);
       remaining -= fromDeposit;
     }
 
-    // Then winningBalance
     if (remaining > 0) {
       const fromWinning = Math.min(remaining, data.winningBalance);
       if (fromWinning > 0) {
@@ -213,7 +220,6 @@ export const ColorPredictionGame = () => {
       }
     }
 
-    // Then bonusBalance
     if (remaining > 0) {
       const fromBonus = Math.min(remaining, data.bonusBalance);
       if (fromBonus > 0) {
@@ -222,14 +228,12 @@ export const ColorPredictionGame = () => {
       }
     }
 
-    if (remaining > 0) {
-      throw new Error('Balance calculation error');
-    }
+    if (remaining > 0.01) throw new Error('Balance calculation error');
 
     await updateDoc(walletRef, updates);
   };
 
-  // Save bet record to Firestore
+  // Save bet record to Firestore — non-throwing
   const saveBetRecord = async (
     uid: string,
     round: number,
@@ -252,27 +256,22 @@ export const ColorPredictionGame = () => {
       createdAt: serverTimestamp(),
     };
 
-    // Save to both collections — don't throw if one fails
-    const promises = [
+    await Promise.all([
       addDoc(collection(db, 'gameBets'), record).catch((e) =>
         console.error('gameBets write failed:', e)
       ),
       addDoc(collection(db, 'bets'), record).catch((e) =>
         console.error('bets write failed:', e)
       ),
-    ];
-
-    await Promise.all(promises);
+    ]);
   };
 
+  // Round end handler — uses refs to avoid stale closures
   const handleRoundEnd = async () => {
-    // Prevent double processing
     if (processingRef.current) return;
     processingRef.current = true;
 
-    const colors: ColorChoice[] = [
-      'red', 'green', 'violet', 'red', 'green', 'red', 'green',
-    ];
+    const colors: ColorChoice[] = ['red', 'green', 'violet', 'red', 'green', 'red', 'green'];
     const res = colors[Math.floor(Math.random() * colors.length)];
     const bet = currentBetRef.current;
     const round = roundNumberRef.current;
@@ -287,46 +286,34 @@ export const ColorPredictionGame = () => {
 
       try {
         if (won) {
-          // Only credit the NET PROFIT (bet amount was already deducted)
+          // Credit only net profit (bet was already deducted at placement)
           const netProfit = payout - bet.amount;
-          if (netProfit > 0) {
-            await safeWalletCredit(uid, netProfit);
-          }
+          await safeWalletCredit(uid, netProfit);
           setShowWinAnim(true);
           toast.success(`🎉 You won ₹${payout}!`, { duration: 3000 });
           setTimeout(() => setShowWinAnim(false), 3000);
         } else {
           toast.error(`❌ You lost ₹${bet.amount}`);
         }
-
-        // Save bet record (non-blocking, won't crash the game)
-        saveBetRecord(uid, round, bet.color, bet.amount, res, won, payout).catch(
-          (e) => console.error('Failed to save bet record:', e)
-        );
-
-      } catch (error: any) {
-        console.error('Wallet update error:', error);
-        // Don't show scary error — log it and continue
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : 'Unknown error';
+        console.error('Wallet credit error:', msg);
         if (won) {
-          toast.error('Win credited — please refresh if balance not updated');
+          toast.error('Win recorded — refresh if balance not updated');
         }
       }
 
-      // Always update local bet history regardless of Firestore result
+      // Save record — never blocks the game
+      saveBetRecord(uid, round, bet.color, bet.amount, res, won, payout).catch(
+        console.error
+      );
+
       setBetHistory((prev) => [
-        {
-          round,
-          color: bet.color,
-          amount: bet.amount,
-          result: res,
-          won,
-          payout,
-        },
+        { round, color: bet.color, amount: bet.amount, result: res, won, payout },
         ...prev.slice(0, 9),
       ]);
     }
 
-    // Update round history
     setRoundHistory((prev) => [
       {
         id: `round${round}`,
@@ -337,23 +324,21 @@ export const ColorPredictionGame = () => {
       ...prev.slice(0, 19),
     ]);
 
-    // Reset for next round
     setTimeout(() => {
       setRoundNumber((prev) => prev + 1);
       setPhase('betting');
       setResult(null);
       setSelectedColor(null);
       setCurrentBet(null);
-      processingRef.current = false; // allow next round processing
+      processingRef.current = false;
     }, 3000);
   };
 
-  // Game timer — stable, uses refs
+  // Game timer — empty deps, all state accessed via refs
   useEffect(() => {
     const interval = setInterval(() => {
       setTimer((prev) => {
         if (prev <= 1) {
-          // Only trigger if not already processing
           if (!processingRef.current) {
             handleRoundEnd();
           }
@@ -368,7 +353,7 @@ export const ColorPredictionGame = () => {
 
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // empty deps — uses refs for all state
+  }, []);
 
   const placeBet = async () => {
     if (!selectedColor) return toast.error('Select a color first!');
@@ -376,11 +361,8 @@ export const ColorPredictionGame = () => {
     if (!currentUser?.uid) return toast.error('Please login to play');
     if (walletLoading) return toast.error('Loading wallet, please wait...');
     if (betAmount > wallet.totalBalance)
-      return toast.error(
-        `Insufficient balance! You have ₹${wallet.totalBalance.toFixed(0)}`
-      );
-    if (phaseRef.current !== 'betting')
-      return toast.error('Betting is closed for this round');
+      return toast.error(`Insufficient balance! You have ₹${wallet.totalBalance.toFixed(0)}`);
+    if (phaseRef.current !== 'betting') return toast.error('Betting is closed for this round');
     if (currentBetRef.current) return toast.error('Bet already placed!');
     if (placingBet) return;
 
@@ -388,12 +370,11 @@ export const ColorPredictionGame = () => {
     try {
       await safeWalletDeduct(currentUser.uid, betAmount);
       setCurrentBet({ color: selectedColor, amount: betAmount });
-      toast.success(
-        `✅ ₹${betAmount} on ${colorConfig[selectedColor].label}!`
-      );
-    } catch (error: any) {
-      console.error('Place bet error:', error);
-      toast.error(error?.message || 'Failed to place bet. Try again.');
+      toast.success(`✅ ₹${betAmount} on ${colorConfig[selectedColor].label}!`);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Failed to place bet';
+      console.error('Place bet error:', msg);
+      toast.error(msg);
     } finally {
       setPlacingBet(false);
     }
@@ -412,9 +393,7 @@ export const ColorPredictionGame = () => {
           <ChevronLeft className="w-5 h-5" />
         </button>
         <div>
-          <h1 className="text-xl font-bold font-sora text-white">
-            🎨 Color Prediction
-          </h1>
+          <h1 className="text-xl font-bold font-sora text-white">🎨 Color Prediction</h1>
           <div className="flex items-center gap-3 text-xs text-white/40 mt-0.5">
             <span className="flex items-center gap-1">
               <Users className="w-3 h-3" />
@@ -436,16 +415,10 @@ export const ColorPredictionGame = () => {
           >
             <div className="text-center">
               <div className="text-8xl mb-4">🎉</div>
-              <div className="text-4xl font-bold text-green-400 font-sora">
-                YOU WON!
-              </div>
+              <div className="text-4xl font-bold text-green-400 font-sora">YOU WON!</div>
               {currentBetRef.current && (
                 <div className="text-2xl text-white mt-2">
-                  ₹
-                  {Math.floor(
-                    currentBetRef.current.amount *
-                      MULTIPLIERS[currentBetRef.current.color]
-                  )}
+                  ₹{Math.floor(currentBetRef.current.amount * MULTIPLIERS[currentBetRef.current.color])}
                 </div>
               )}
             </div>
@@ -461,12 +434,8 @@ export const ColorPredictionGame = () => {
           <div className="glass rounded-2xl p-5 border border-white/8">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <p className="text-xs text-white/40 uppercase tracking-wider">
-                  Round
-                </p>
-                <p className="text-2xl font-bold font-sora text-white">
-                  #{roundNumber}
-                </p>
+                <p className="text-xs text-white/40 uppercase tracking-wider">Round</p>
+                <p className="text-2xl font-bold font-sora text-white">#{roundNumber}</p>
               </div>
               <div className="text-center">
                 <div
@@ -543,8 +512,7 @@ export const ColorPredictionGame = () => {
                   >
                     {currentBetRef.current.color === result
                       ? `+₹${Math.floor(
-                          currentBetRef.current.amount *
-                            MULTIPLIERS[currentBetRef.current.color]
+                          currentBetRef.current.amount * MULTIPLIERS[currentBetRef.current.color]
                         )}`
                       : `-₹${currentBetRef.current.amount}`}
                   </p>
@@ -568,9 +536,7 @@ export const ColorPredictionGame = () => {
                     key={color}
                     whileHover={{ scale: phase === 'betting' ? 1.05 : 1 }}
                     whileTap={{ scale: phase === 'betting' ? 0.95 : 1 }}
-                    onClick={() =>
-                      phase === 'betting' && !currentBet && setSelectedColor(color)
-                    }
+                    onClick={() => phase === 'betting' && !currentBet && setSelectedColor(color)}
                     disabled={phase !== 'betting' || !!currentBet}
                     className={`
                       relative p-4 rounded-2xl border-2 transition-all
@@ -591,12 +557,8 @@ export const ColorPredictionGame = () => {
                         ✓
                       </div>
                     )}
-                    <div
-                      className={`w-12 h-12 rounded-full ${config.bg} mx-auto mb-2 shadow-lg`}
-                    />
-                    <p className="text-xs font-bold text-white text-center">
-                      {config.label}
-                    </p>
+                    <div className={`w-12 h-12 rounded-full ${config.bg} mx-auto mb-2 shadow-lg`} />
+                    <p className="text-xs font-bold text-white text-center">{config.label}</p>
                     <p className={`text-xs ${config.text} text-center font-semibold`}>
                       {config.multiplier}
                     </p>
@@ -622,9 +584,7 @@ export const ColorPredictionGame = () => {
               <input
                 type="number"
                 value={betAmount}
-                onChange={(e) =>
-                  setBetAmount(Math.max(10, parseInt(e.target.value) || 10))
-                }
+                onChange={(e) => setBetAmount(Math.max(10, parseInt(e.target.value) || 10))}
                 disabled={!!currentBet}
                 className="input-gaming flex-1 text-center py-2.5 rounded-xl text-lg font-bold disabled:opacity-40"
               />
@@ -743,9 +703,7 @@ export const ColorPredictionGame = () => {
                       <p className="text-[10px] text-white/40">₹{bet.amount}</p>
                     </div>
                     <span
-                      className={`text-xs font-bold ${
-                        bet.won ? 'text-green-400' : 'text-red-400'
-                      }`}
+                      className={`text-xs font-bold ${bet.won ? 'text-green-400' : 'text-red-400'}`}
                     >
                       {bet.won ? `+₹${bet.payout}` : `-₹${bet.amount}`}
                     </span>
@@ -776,11 +734,7 @@ export const ColorPredictionGame = () => {
                     }`}
                     title={`Round #${round.roundNumber}: ${round.result}`}
                   >
-                    {round.result === 'red'
-                      ? 'R'
-                      : round.result === 'green'
-                      ? 'G'
-                      : 'V'}
+                    {round.result === 'red' ? 'R' : round.result === 'green' ? 'G' : 'V'}
                   </div>
                 ))}
               </div>
@@ -794,11 +748,11 @@ export const ColorPredictionGame = () => {
             </div>
             <div className="divide-y divide-white/5">
               {[
-                { user: 'R***j', color: 'red', amount: 500 },
-                { user: 'P***a', color: 'green', amount: 200 },
-                { user: 'A***t', color: 'violet', amount: 1000 },
-                { user: 'N***a', color: 'red', amount: 150 },
-                { user: 'S***n', color: 'green', amount: 300 },
+                { user: 'R***j', color: 'red' as ColorChoice, amount: 500 },
+                { user: 'P***a', color: 'green' as ColorChoice, amount: 200 },
+                { user: 'A***t', color: 'violet' as ColorChoice, amount: 1000 },
+                { user: 'N***a', color: 'red' as ColorChoice, amount: 150 },
+                { user: 'S***n', color: 'green' as ColorChoice, amount: 300 },
               ].map((bet, i) => (
                 <motion.div
                   key={i}
@@ -807,15 +761,9 @@ export const ColorPredictionGame = () => {
                   transition={{ delay: i * 0.05 }}
                   className="flex items-center gap-3 p-3"
                 >
-                  <div
-                    className={`w-5 h-5 rounded-full flex-shrink-0 ${
-                      colorConfig[bet.color as ColorChoice].bg
-                    }`}
-                  />
+                  <div className={`w-5 h-5 rounded-full flex-shrink-0 ${colorConfig[bet.color].bg}`} />
                   <span className="text-xs text-white/60 flex-1">{bet.user}</span>
-                  <span className="text-xs font-semibold text-white">
-                    ₹{bet.amount}
-                  </span>
+                  <span className="text-xs font-semibold text-white">₹{bet.amount}</span>
                 </motion.div>
               ))}
             </div>
@@ -827,12 +775,12 @@ export const ColorPredictionGame = () => {
 };
 ```
 
-**Root causes fixed:**
+**What caused the build error:**
 
-1. **`processingRef`** — Prevents `handleRoundEnd` from firing twice when timer resets
-2. **Net profit only credited** — Was crediting full `payout` but bet was already deducted at placement, now only credits `payout - betAmount`
-3. **`safeWalletCredit` / `safeWalletDeduct`** — Fetches fresh Firestore doc before every write, eliminates stale state errors
-4. **`saveBetRecord` never throws** — Uses `.catch()` per collection so a Firestore rules error on one collection won't crash the whole result
-5. **`phaseRef`** used in `placeBet` instead of stale closure `phase`
-6. **`currentBetRef`** used in result display instead of stale `currentBet` state
-7. **Empty deps `[]` on timer** with refs for all accessed state — eliminates the re-registration bug
+The Vercel build was failing because the previous response accidentally included ` ```tsx ` code fence markers **inside the file content** at lines 2-3, which is invalid TypeScript syntax that esbuild cannot parse.
+
+**This clean version also includes:**
+- Proper `Record<ColorChoice, number>` typing for `MULTIPLIERS`
+- Proper `Record<ColorChoice, {...}>` typing for `colorConfig`  
+- `error instanceof Error` checks instead of `any` for better TypeScript compliance
+- `as ColorChoice` casts on the live bets array to avoid implicit `any`
