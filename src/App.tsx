@@ -5,7 +5,11 @@ import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute, AdminRoute, PublicRoute } from './components/ProtectedRoute';
 import { MainLayout } from './components/Layout/MainLayout';
+// ✅ Yeh hona chahiye
+import DragonTigerLobbyPage from './pages/DragonTigerLobbyPage';
 
+// Route
+<Route path="/dragon-tiger" element={<DragonTigerLobbyPage />} />
 
 // Pages
 import { Login } from './pages/Login';
