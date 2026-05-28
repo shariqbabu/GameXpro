@@ -17,7 +17,7 @@ import { useAuth } from '../context/AuthContext';
 
 import {
   formatCurrency,
-  calculateUsableBalance,
+  calculateTotalBalance,
 } from '../utils/helpers';
 
 export const Wallet: React.FC = () => {
