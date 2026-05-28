@@ -18,11 +18,7 @@ export const DragonTigerLobbyPage: React.FC = () => {
   const [minBet, setMinBet] = useState(50);
   const [maxBet, setMaxBet] = useState(5000);
 
-  const uid =
-  firebaseUser?.uid ||
-  user?.id ||
-  (user as any)?.uid ||
-  '';
+  const uid = firebaseUser?.uid || user?.id || (user as any)?.uid ||'';
   const userName =
   (user as any)?.username ||
   (user as any)?.name ||
