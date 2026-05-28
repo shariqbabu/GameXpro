@@ -9,7 +9,7 @@ import { DragonTigerTable } from '../types';
 import toast from 'react-hot-toast';
 
 export const DragonTigerLobbyPage: React.FC = () => {
-  const { userProfile } = useAuth();
+  const { firebaseUser, user, wallet, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [tables, setTables] = useState<DragonTigerTable[]>([]);
   const [creating, setCreating] = useState(false);
@@ -18,8 +18,29 @@ export const DragonTigerLobbyPage: React.FC = () => {
   const [minBet, setMinBet] = useState(50);
   const [maxBet, setMaxBet] = useState(5000);
 
-  const uid = userProfile?.uid || '';
-  const username = userProfile?.username || userProfile?.name || 'Player';
+  const uid =
+  firebaseUser?.uid ||
+  user?.id ||
+  (user as any)?.uid ||
+  '';
+  const userName =
+  (user as any)?.username ||
+  (user as any)?.name ||
+  firebaseUser?.displayName ||
+  firebaseUser?.email?.split('@')[0] ||
+  'Player';
+
+  const photoURL =
+  (user as any)?.photoURL ||
+  (user as any)?.avatar ||
+  firebaseUser?.photoURL ||
+  '';
+
+  const walletBalance =
+  (wallet?.depositBalance || 0) +
+  (wallet?.winningBalance || 0) +
+  (wallet?.referralBalance || 0) +
+  (wallet?.bonusBalance || 0);
 
   useEffect(() => {
     const unsub = getActiveTables((t) => setTables(t));
