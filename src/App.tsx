@@ -8,8 +8,6 @@ import { MainLayout } from './components/Layout/MainLayout';
 // ✅ Yeh hona chahiye
 import DragonTigerLobbyPage from './pages/DragonTigerLobbyPage';
 
-// Route
-<Route path="/dragon-tiger" element={<DragonTigerLobbyPage />} />
 
 // Pages
 import { Login } from './pages/Login';
@@ -67,7 +65,7 @@ export default function App() {
                 <Route path="/game-room/:roomId" element={<GameRoom />} />
                 <Route path="/games/color-prediction" element={<ColorPrediction />} />
                 <Route path="/games/dice" element={<DiceGame />} />
-                
+                <Route path="/dragon-tiger" element={<DragonTigerLobbyPage />} />
                 <Route path="dragon-tiger" element={<DragonTigerLobbyPage />} />
                 <Route path="dragon-tiger/:tableId" element={<DragonTigerRoomPage />} />
                 {/* Admin routes */}
