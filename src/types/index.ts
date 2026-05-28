@@ -233,3 +233,34 @@ export interface ProfileForm {
   name: string;
   phone: string;
 }
+
+// types/index.ts mein add karo
+export interface PokerRoom {
+  id: string;
+  roomId: string;
+  status: 'WAITING' | 'PLAYING' | 'FINISHED' | 'CANCELLED';
+  entryFee: number;
+  pot: number;
+  phase: 'waiting' | 'pre-flop' | 'flop' | 'turn' | 'river' | 'showdown';
+  player1: PokerPlayer | null;
+  player2: PokerPlayer | null;
+  communityCards: Card[];
+  currentTurn: string; // uid
+  winner: string | null;
+  winnerName: string | null;
+  deck: Card[];
+  createdAt: any;
+  updatedAt: any;
+}
+
+export interface PokerPlayer {
+  uid: string;
+  name: string;
+  photoURL: string;
+  chips: number;
+  cards: Card[];
+  currentBet: number;
+  action: string | null;
+  isFolded: boolean;
+  isReady: boolean;
+}
