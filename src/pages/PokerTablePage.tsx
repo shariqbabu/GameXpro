@@ -14,7 +14,32 @@ import {
 } from '../firebase/poker';
 
 export const PokerTablePage: React.FC = () => {
-  const { firebaseUser, user } = useAuth();
+  const { firebaseUser, user, wallet, loading: authLoading } = useAuth();
+
+const uid =
+  firebaseUser?.uid ||
+  user?.id ||
+  (user as any)?.uid ||
+  '';
+
+const userName =
+  (user as any)?.username ||
+  (user as any)?.name ||
+  firebaseUser?.displayName ||
+  firebaseUser?.email?.split('@')[0] ||
+  'Player';
+
+const photoURL =
+  (user as any)?.photoURL ||
+  (user as any)?.avatar ||
+  firebaseUser?.photoURL ||
+  '';
+
+const walletBalance =
+  (wallet?.depositBalance || 0) +
+  (wallet?.winningBalance || 0) +
+  (wallet?.referralBalance || 0) +
+  (wallet?.bonusBalance || 0);
   const navigate = useNavigate();
 
   // ── States ──────────────────────────────────────────────
