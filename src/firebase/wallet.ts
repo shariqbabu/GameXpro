@@ -48,17 +48,17 @@ export const addFunds = async (
       throw new Error('Wallet not found');
     }
 
-    const wallet = walletSnap.data() as Wallet;
-    const previousBalance = wallet.totalBalance;
-    const newBalance = previousBalance + amount;
-    const newTypeBalance = (wallet[type] || 0) + amount;
+    const wallet =
+  walletSnap.data() as Wallet;
 
-    tx.update(walletRef, {
-      [type]: newTypeBalance,
-      totalBalance: newBalance,
-      updatedAt: serverTimestamp(),
-    });
+const previousBalance = calculateTotalBalance(wallet);
+const newTypeBalance = (wallet[type] || 0) + amount;
+const currentBalance = previousBalance + amount;
 
+tx.update(walletRef, {
+  [type]: newTypeBalance,
+  updatedAt: serverTimestamp(),
+});
     const txRef = doc(collection(db, 'transactions'));
     tx.set(txRef, {
       uid,
