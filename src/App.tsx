@@ -6,6 +6,7 @@ import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute, AdminRoute, PublicRoute } from './components/ProtectedRoute';
 import { MainLayout } from './components/Layout/MainLayout';
 
+
 // Pages
 import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
@@ -23,6 +24,7 @@ import { Matchmaking } from './pages/Matchmaking';
 import { GameRoom } from './pages/GameRoom';
 import { ColorPrediction } from './pages/games/ColorPrediction';
 import { DiceGame } from './pages/games/DiceGame';
+import { PokerTablePage } from './pages/PokerTablePage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -61,6 +63,7 @@ export default function App() {
                 <Route path="/game-room/:roomId" element={<GameRoom />} />
                 <Route path="/games/color-prediction" element={<ColorPrediction />} />
                 <Route path="/games/dice" element={<DiceGame />} />
+                <Route path="poker" element={<PokerTablePage />} />
 
                 {/* Admin routes */}
                 <Route element={<AdminRoute />}>
