@@ -23,6 +23,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { logOut } from '../../firebase/auth';
 import { useAppStore } from '../../store/useStore';
+import { formatCurrency } from '../../utils/helpers';
 import { calculateTotalBalance } from '../../utils/helpers';
 import toast from 'react-hot-toast';
 
