@@ -10,7 +10,10 @@ import { Loader2 } from 'lucide-react';
 
 const CARD_SUITS = ['♠', '♥', '♦', '♣'];
 
-const suitColor = (suit: string) => suit === '♥' || suit === '♦' ? 'text-red-400' : 'text-white';
+const suitColor = (suit: string) =>
+  suit === '♥' || suit === '♦'
+    ? 'text-red-500'
+    : 'text-black';
 
 const PlayingCard: React.FC<{ value?: number; suit?: string; hidden?: boolean; revealed?: boolean }> = ({
   value,
