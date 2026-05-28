@@ -11,7 +11,7 @@ import { TransactionsPage } from './pages/TransactionsPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { ReferralPage } from './pages/ReferralPage';
 import { useAuth } from './hooks/useAuth';
-import DiceGame from '../games/dice/pages/DiceGame';
+import { DiceGame } from './games/dice/DiceGame';
 
 
 export default function App() {
