@@ -11,6 +11,12 @@ import toast from 'react-hot-toast';
 export const DragonTigerLobbyPage: React.FC = () => {
   const { firebaseUser, user, wallet, loading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const uid = firebaseUser?.uid || '';
+  const username =
+  user?.username ||
+  user?.name ||
+  firebaseUser?.displayName ||
+  'Player';
   const [tables, setTables] = useState<DragonTigerTable[]>([]);
   const [creating, setCreating] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
