@@ -18,21 +18,6 @@ export const DragonTigerLobbyPage: React.FC = () => {
   const [minBet, setMinBet] = useState(50);
   const [maxBet, setMaxBet] = useState(5000);
 
-  const { firebaseUser, user, loading: authLoading } = useAuth();
-
-const uid =
-  firebaseUser?.uid ||
-  user?.id ||
-  (user as any)?.uid ||
-  '';
-
-const username =
-  (user as any)?.username ||
-  (user as any)?.name ||
-  firebaseUser?.displayName ||
-  firebaseUser?.email?.split('@')[0] ||
-  'Player';
-
   useEffect(() => {
     const unsub = getActiveTables((t) => setTables(t));
     return () => unsub();
