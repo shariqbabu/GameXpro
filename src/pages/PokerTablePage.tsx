@@ -14,7 +14,7 @@ import {
 } from '../firebase/poker';
 
 export const PokerTablePage: React.FC = () => {
-  const { userProfile } = useAuth();
+  const { firebaseUser, user } = useAuth();
   const navigate = useNavigate();
 
   // ── States ──────────────────────────────────────────────
@@ -33,9 +33,17 @@ export const PokerTablePage: React.FC = () => {
   const unsubQueue = useRef<(() => void) | null>(null);
   const unsubRoom = useRef<(() => void) | null>(null);
 
-  const uid = userProfile?.uid || '';
-  const userName = userProfile?.username || 'Player';
-  const photoURL = userProfile?.photoURL || '';
+  const uid = firebaseUser?.uid || '';
+
+const userName =
+  user?.username ||
+  firebaseUser?.displayName ||
+  'Player';
+
+const photoURL =
+  user?.photoURL ||
+  firebaseUser?.photoURL ||
+  '';
 
   const TABLES = [
     { id: 't1', name: 'Beginner Table', blinds: '₹5/₹10', entryFee: 50 },
