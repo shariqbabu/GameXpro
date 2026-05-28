@@ -18,7 +18,20 @@ export const DragonTigerLobbyPage: React.FC = () => {
   const [minBet, setMinBet] = useState(50);
   const [maxBet, setMaxBet] = useState(5000);
 
-  const uid = firebaseUser?.uid || user?.id || (user as any)?.uid ||'';
+  const { firebaseUser, user, loading: authLoading } = useAuth();
+
+const uid =
+  firebaseUser?.uid ||
+  user?.id ||
+  (user as any)?.uid ||
+  '';
+
+const username =
+  (user as any)?.username ||
+  (user as any)?.name ||
+  firebaseUser?.displayName ||
+  firebaseUser?.email?.split('@')[0] ||
+  'Player';
 
   useEffect(() => {
     const unsub = getActiveTables((t) => setTables(t));
@@ -26,22 +39,39 @@ export const DragonTigerLobbyPage: React.FC = () => {
   }, []);
 
   const handleCreateTable = async () => {
-    if (!uid) { toast.error('Please login'); return; }
-    if (!tableName.trim()) { toast.error('Table name required'); return; }
+  if (authLoading) {
+    toast.error('Please wait, loading account...');
+    return;
+  }
+    if (!uid) {
+    toast.error('Please login first');
+    return;
+  }
+
+  if (!tableName.trim()) {
+    toast.error('Table name required');
+    return;
+  }
 
     setCreating(true);
     try {
-      const tableId = await createDragonTigerTable(
-        uid, username, tableName, minBet, maxBet
-      );
-      toast.success('Table created!');
-      navigate(`/dragon-tiger/${tableId}`);
+    const tableId = await createDragonTigerTable(
+      uid,
+      username,
+      tableName,
+      minBet,
+      maxBet
+    );
+
+    toast.success('Table created!');
+    navigate(`/dragon-tiger/${tableId}`);
+      
     } catch (err: any) {
-      toast.error(err.message || 'Failed to create table');
-    } finally {
-      setCreating(false);
-    }
-  };
+    toast.error(err.message || 'Failed to create table');
+  } finally {
+    setCreating(false);
+  }
+};
 
   return (
     <div className="space-y-6">
