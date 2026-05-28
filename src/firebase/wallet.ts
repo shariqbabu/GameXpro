@@ -14,7 +14,9 @@ import {
 } from 'firebase/firestore';
 import { db } from './config';
 import { Wallet, Transaction, TransactionType } from '../types';
-import { calculateUsableBalance, calculateTotalBalance} from '../utils/helpers';
+import { calculateUsableBalance, calculateTotalBalance } from '../utils/helpers';
+
+// ─── Get Wallet (one-time) ───────────────────────────────────────────────────
 
 export const getWallet = async (uid: string): Promise<Wallet | null> => {
   const snap = await getDoc(doc(db, 'wallets', uid));
@@ -22,15 +24,18 @@ export const getWallet = async (uid: string): Promise<Wallet | null> => {
   return snap.data() as Wallet;
 };
 
-export const subscribeWallet = (uid: string, callback: (wallet: Wallet | null) => void) => {
+// ─── Subscribe Wallet (realtime) ─────────────────────────────────────────────
+
+export const subscribeWallet = (
+  uid: string,
+  callback: (wallet: Wallet | null) => void
+) => {
   return onSnapshot(doc(db, 'wallets', uid), (snap) => {
-    if (snap.exists()) {
-      callback(snap.data() as Wallet);
-    } else {
-      callback(null);
-    }
+    callback(snap.exists() ? (snap.data() as Wallet) : null);
   });
 };
+
+// ─── Add Funds ───────────────────────────────────────────────────────────────
 
 export const addFunds = async (
   uid: string,
@@ -41,37 +46,45 @@ export const addFunds = async (
   if (amount <= 0) throw new Error('Amount must be positive');
 
   await runTransaction(db, async (tx) => {
+    // ── READS ────────────────────────────────────────────────────────────────
     const walletRef = doc(db, 'wallets', uid);
     const walletSnap = await tx.get(walletRef);
 
-    if (!walletSnap.exists()) {
-      throw new Error('Wallet not found');
-    }
+    if (!walletSnap.exists()) throw new Error('Wallet not found');
 
-    const wallet =
-  walletSnap.data() as Wallet;
+    // ── COMPUTE ──────────────────────────────────────────────────────────────
+    const wallet = walletSnap.data() as Wallet;
+    const previousBalance = calculateTotalBalance(wallet);
+    const newTypeBalance = (wallet[type] || 0) + amount;
+    const currentBalance = previousBalance + amount;
 
-const previousBalance = calculateTotalBalance(wallet);
-const newTypeBalance = (wallet[type] || 0) + amount;
-const currentBalance = previousBalance + amount;
+    const txType =
+      type === 'depositBalance' ? 'DEPOSIT'
+      : type === 'winningBalance' ? 'GAME_WIN'
+      : type === 'bonusBalance' ? 'BONUS'
+      : 'REFERRAL';
 
-tx.update(walletRef, {
-  [type]: newTypeBalance,
-  updatedAt: serverTimestamp(),
-});
+    // ── WRITES ───────────────────────────────────────────────────────────────
+    tx.update(walletRef, {
+      [type]: newTypeBalance,
+      updatedAt: serverTimestamp(),
+    });
+
     const txRef = doc(collection(db, 'transactions'));
     tx.set(txRef, {
       uid,
-      type: type === 'depositBalance' ? 'DEPOSIT' : type === 'winningBalance' ? 'GAME_WIN' : type === 'bonusBalance' ? 'BONUS' : 'REFERRAL',
+      type: txType,
       amount,
       previousBalance,
-      currentBalance: currentBalance,
+      currentBalance,
       status: 'COMPLETED',
       description,
       createdAt: serverTimestamp(),
     });
   });
 };
+
+// ─── Deduct Funds ────────────────────────────────────────────────────────────
 
 export const deductFunds = async (
   uid: string,
@@ -82,36 +95,45 @@ export const deductFunds = async (
   if (amount <= 0) throw new Error('Amount must be positive');
 
   await runTransaction(db, async (tx) => {
+    // ── READS ────────────────────────────────────────────────────────────────
     const walletRef = doc(db, 'wallets', uid);
     const walletSnap = await tx.get(walletRef);
 
-    if (!walletSnap.exists()) {
-      throw new Error('Wallet not found');
-    }
+    if (!walletSnap.exists()) throw new Error('Wallet not found');
 
+    // ── COMPUTE ──────────────────────────────────────────────────────────────
     const wallet = walletSnap.data() as Wallet;
     const usable = calculateUsableBalance(wallet);
 
-    if (usable < amount) {
-      throw new Error('Insufficient balance');
-    }
+    if (usable < amount) throw new Error('Insufficient balance');
 
-    // Deduct from winning balance first, then referral, then bonus (10% only)
+    // Deduction order: deposit → winning → referral → bonus (10% only)
     let remaining = amount;
+    let newDeposit = wallet.depositBalance;
     let newWinning = wallet.winningBalance;
     let newReferral = wallet.referralBalance;
     let newBonus = wallet.bonusBalance;
 
-    const fromWinning = Math.min(newWinning, remaining);
-    newWinning -= fromWinning;
-    remaining -= fromWinning;
+    // 1. Deposit first
+    const fromDeposit = Math.min(newDeposit, remaining);
+    newDeposit -= fromDeposit;
+    remaining -= fromDeposit;
 
+    // 2. Then winning
+    if (remaining > 0) {
+      const fromWinning = Math.min(newWinning, remaining);
+      newWinning -= fromWinning;
+      remaining -= fromWinning;
+    }
+
+    // 3. Then referral
     if (remaining > 0) {
       const fromReferral = Math.min(newReferral, remaining);
       newReferral -= fromReferral;
       remaining -= fromReferral;
     }
 
+    // 4. Finally bonus (max 10% of original bonus balance)
     if (remaining > 0) {
       const maxBonus = wallet.bonusBalance * 0.1;
       const fromBonus = Math.min(maxBonus, remaining);
@@ -119,19 +141,19 @@ export const deductFunds = async (
       remaining -= fromBonus;
     }
 
-    if (remaining > 0) {
-      throw new Error('Insufficient usable balance');
-    }
+    if (remaining > 0) throw new Error('Insufficient usable balance');
 
     const previousBalance = calculateTotalBalance(wallet);
     const currentBalance = previousBalance - amount;
 
+    // ── WRITES ───────────────────────────────────────────────────────────────
     tx.update(walletRef, {
-    winningBalance: newWinning,
-    referralBalance: newReferral,
-    bonusBalance: newBonus,
-    updatedAt: serverTimestamp(),
-  });
+      depositBalance: newDeposit,
+      winningBalance: newWinning,
+      referralBalance: newReferral,
+      bonusBalance: newBonus,
+      updatedAt: serverTimestamp(),
+    });
 
     const txRef = doc(collection(db, 'transactions'));
     tx.set(txRef, {
@@ -139,7 +161,7 @@ export const deductFunds = async (
       type,
       amount: -amount,
       previousBalance,
-      currentBalance: newTotal,
+      currentBalance, // FIX: was using undefined `newTotal`
       status: 'COMPLETED',
       description,
       createdAt: serverTimestamp(),
@@ -147,18 +169,27 @@ export const deductFunds = async (
   });
 };
 
+// ─── Withdraw Funds ──────────────────────────────────────────────────────────
+
 export const withdrawFunds = async (uid: string, amount: number, upiId: string) => {
   if (amount < 100) throw new Error('Minimum withdrawal is ₹100');
 
   await runTransaction(db, async (tx) => {
+    // ── READS (all reads BEFORE any writes) ──────────────────────────────────
     const walletRef = doc(db, 'wallets', uid);
-    const walletSnap = await tx.get(walletRef);
+    const userRef = doc(db, 'users', uid);
+
+    const [walletSnap, userSnap] = await Promise.all([
+      tx.get(walletRef),
+      tx.get(userRef), // FIX: was after a write — Firestore requires reads before writes
+    ]);
 
     if (!walletSnap.exists()) throw new Error('Wallet not found');
 
+    // ── COMPUTE ──────────────────────────────────────────────────────────────
     const wallet = walletSnap.data() as Wallet;
+    const userData = userSnap.data();
 
-    // Only winning balance can be withdrawn
     if (wallet.winningBalance < amount) {
       throw new Error('Insufficient winning balance for withdrawal');
     }
@@ -167,14 +198,11 @@ export const withdrawFunds = async (uid: string, amount: number, upiId: string) 
     const newWinning = wallet.winningBalance - amount;
     const currentBalance = previousBalance - amount;
 
-   tx.update(walletRef, {
-   winningBalance: newWinning,
-   updatedAt: serverTimestamp(),
-});
-
-    const userRef = doc(db, 'users', uid);
-    const userSnap = await tx.get(userRef);
-    const userData = userSnap.data();
+    // ── WRITES ───────────────────────────────────────────────────────────────
+    tx.update(walletRef, {
+      winningBalance: newWinning,
+      updatedAt: serverTimestamp(),
+    });
 
     const withdrawalRef = doc(collection(db, 'withdrawals'));
     tx.set(withdrawalRef, {
@@ -194,7 +222,7 @@ export const withdrawFunds = async (uid: string, amount: number, upiId: string) 
       type: 'WITHDRAWAL',
       amount: -amount,
       previousBalance,
-      currentBalance: newTotal,
+      currentBalance, // FIX: was using undefined `newTotal`
       status: 'PENDING',
       description: `Withdrawal to ${upiId}`,
       createdAt: serverTimestamp(),
@@ -202,7 +230,12 @@ export const withdrawFunds = async (uid: string, amount: number, upiId: string) 
   });
 };
 
-export const getTransactions = async (uid: string, limitCount = 20): Promise<Transaction[]> => {
+// ─── Get Transactions (one-time) ─────────────────────────────────────────────
+
+export const getTransactions = async (
+  uid: string,
+  limitCount = 20
+): Promise<Transaction[]> => {
   const q = query(
     collection(db, 'transactions'),
     where('uid', '==', uid),
@@ -210,8 +243,10 @@ export const getTransactions = async (uid: string, limitCount = 20): Promise<Tra
     limit(limitCount)
   );
   const snap = await getDocs(q);
-  return snap.docs.map(d => ({ id: d.id, ...d.data() } as Transaction));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Transaction));
 };
+
+// ─── Subscribe Transactions (realtime) ───────────────────────────────────────
 
 export const subscribeTransactions = (
   uid: string,
@@ -224,10 +259,12 @@ export const subscribeTransactions = (
     limit(20)
   );
   return onSnapshot(q, (snap) => {
-    const txs = snap.docs.map(d => ({ id: d.id, ...d.data() } as Transaction));
+    const txs = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Transaction));
     callback(txs);
   });
 };
+
+// ─── Create Deposit Request ───────────────────────────────────────────────────
 
 export const createDeposit = async (
   uid: string,
