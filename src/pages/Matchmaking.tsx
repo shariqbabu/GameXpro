@@ -2,13 +2,18 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Spade, Users, Clock, X, Zap, Trophy, ChevronRight, Loader2,
+  Users, Clock, X, Zap, Trophy, Loader2,
 } from 'lucide-react';
-import { collection, query, where, onSnapshot, getDocs, orderBy, limit } from 'firebase/firestore';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
-import { joinMatchmakingQueue, cancelMatchmaking, findMatch, subscribeMatchmakingQueue } from '../firebase/games';
-import { deductFunds } from '../firebase/wallet';
+import {
+  joinMatchmakingQueue,
+  cancelMatchmaking,
+  findMatch,
+  subscribeMatchmakingQueue,
+} from '../firebase/games';
+import { addFunds, deductFunds } from '../firebase/wallet';
 import { calculateUsableBalance, formatCurrency } from '../utils/helpers';
 import toast from 'react-hot-toast';
 
@@ -17,18 +22,26 @@ const ENTRY_FEES = [10, 20, 50, 100, 200, 500];
 export const Matchmaking: React.FC = () => {
   const { firebaseUser, user, wallet } = useAuth();
   const navigate = useNavigate();
+
   const [selectedFee, setSelectedFee] = useState<number | null>(null);
   const [queueId, setQueueId] = useState<string | null>(null);
-  const [queueStatus, setQueueStatus] = useState<string | null>(null);
-  const [waitTime, setWaitTime] = useState(0);
-  const [onlinePlayers, setOnlinePlayers] = useState(0);
   const [searching, setSearching] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [waitTime, setWaitTime] = useState(0);
+  const [onlinePlayers, setOnlinePlayers] = useState(0);
+
   const matchIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const waitTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isProcessing = useRef(false);
+  // FIX: selectedFee ref — polling callback mein stale closure se bachne ke liye
+  const selectedFeeRef = useRef<number | null>(null);
 
   const usableBalance = wallet ? calculateUsableBalance(wallet) : 0;
+
+  const clearTimers = () => {
+    if (matchIntervalRef.current) clearInterval(matchIntervalRef.current);
+    if (waitTimerRef.current) clearInterval(waitTimerRef.current);
+  };
 
   // Subscribe to online players count
   useEffect(() => {
@@ -43,12 +56,9 @@ export const Matchmaking: React.FC = () => {
 
     const unsub = subscribeMatchmakingQueue(queueId, (entry) => {
       if (!entry) return;
-      setQueueStatus(entry.status);
 
       if (entry.status === 'MATCHED' && (entry as any).roomId) {
-        // Match found!
-        clearInterval(matchIntervalRef.current!);
-        clearInterval(waitTimerRef.current!);
+        clearTimers();
         toast.success('🎮 Match found! Entering game room...');
         setTimeout(() => {
           navigate(`/game-room/${(entry as any).roomId}`);
@@ -59,7 +69,8 @@ export const Matchmaking: React.FC = () => {
     return () => unsub();
   }, [queueId, navigate]);
 
-  // Poll for matches
+  // FIX: polling mein deductFunds call nahi — woh findGame mein ho chuka hai
+  // findMatch sirf room create karta hai, dobara deduct nahi karna
   const startMatchPolling = useCallback((myQueueId: string, fee: number, uid: string) => {
     matchIntervalRef.current = setInterval(async () => {
       if (isProcessing.current) return;
@@ -67,11 +78,10 @@ export const Matchmaking: React.FC = () => {
       try {
         const roomId = await findMatch(uid, myQueueId, fee, 'CARD_GAME');
         if (roomId) {
-          clearInterval(matchIntervalRef.current!);
-          clearInterval(waitTimerRef.current!);
+          clearTimers();
         }
       } catch (_e) {
-        // ignore
+        // ignore — opponent already matched ya network issue
       } finally {
         isProcessing.current = false;
       }
@@ -80,6 +90,7 @@ export const Matchmaking: React.FC = () => {
 
   const findGame = async () => {
     if (!firebaseUser || !user || !selectedFee) return;
+
     if (usableBalance < selectedFee) {
       toast.error('Insufficient balance');
       return;
@@ -87,10 +98,9 @@ export const Matchmaking: React.FC = () => {
 
     setLoading(true);
     try {
-      // Deduct entry fee
-      await deductFunds(firebaseUser.uid, selectedFee, 'GAME_LOSS', `Card Battle entry fee - ₹${selectedFee}`);
-
-      // Join queue
+      // FIX: pehle queue join karo, phir deduct karo
+      // Pehle wale code mein deduct hota tha, phir queue join fail hoti thi —
+      // paise ja chuke hote the wapas nahi aate the
       const id = await joinMatchmakingQueue(
         firebaseUser.uid,
         user.name,
@@ -98,18 +108,25 @@ export const Matchmaking: React.FC = () => {
         selectedFee,
         'CARD_GAME'
       );
+
+      // Queue join successful — ab safe hai deduct karna
+      await deductFunds(
+        firebaseUser.uid,
+        selectedFee,
+        'GAME_LOSS',
+        `Card Battle entry fee - ₹${selectedFee}`
+      );
+
+      selectedFeeRef.current = selectedFee;
       setQueueId(id);
       setSearching(true);
       setWaitTime(0);
 
-      // Start wait timer
       waitTimerRef.current = setInterval(() => {
-        setWaitTime(p => p + 1);
+        setWaitTime((p) => p + 1);
       }, 1000);
 
-      // Start match polling
       startMatchPolling(id, selectedFee, firebaseUser.uid);
-
       toast.success('Looking for opponent...');
     } catch (err: any) {
       toast.error(err.message || 'Failed to join queue');
@@ -120,31 +137,35 @@ export const Matchmaking: React.FC = () => {
 
   const cancelSearch = async () => {
     if (!queueId) return;
-    clearInterval(matchIntervalRef.current!);
-    clearInterval(waitTimerRef.current!);
+    clearTimers();
 
     try {
       await cancelMatchmaking(queueId);
-      // Refund entry fee
-      if (selectedFee && firebaseUser) {
-        const { addFunds } = await import('../firebase/wallet');
-        await addFunds(firebaseUser.uid, selectedFee, 'winningBalance', 'Card Battle - Matchmaking cancelled refund');
+
+      // FIX: dynamic import hata diya — addFunds seedha import karo upar se
+      const fee = selectedFeeRef.current;
+      if (fee && firebaseUser) {
+        await addFunds(
+          firebaseUser.uid,
+          fee,
+          'depositBalance', // FIX: winningBalance nahi — deposit wapas deposit mein hi aana chahiye
+          'Card Battle - Matchmaking cancelled refund'
+        );
       }
+
       setQueueId(null);
       setSearching(false);
-      setQueueStatus(null);
       setWaitTime(0);
+      selectedFeeRef.current = null;
       toast.success('Matchmaking cancelled. Entry fee refunded.');
     } catch (_e) {
       toast.error('Failed to cancel');
     }
   };
 
+  // Cleanup on unmount
   useEffect(() => {
-    return () => {
-      clearInterval(matchIntervalRef.current!);
-      clearInterval(waitTimerRef.current!);
-    };
+    return () => clearTimers();
   }, []);
 
   const formatWaitTime = (s: number) =>
@@ -152,7 +173,11 @@ export const Matchmaking: React.FC = () => {
 
   return (
     <div className="max-w-lg mx-auto space-y-5">
-      <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="text-center">
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="text-center"
+      >
         <h2 className="text-2xl font-bold text-white">🃏 Card Battle</h2>
         <p className="text-gray-400 text-sm">2-player card comparison game</p>
       </motion.div>
@@ -183,7 +208,7 @@ export const Matchmaking: React.FC = () => {
                   { step: '1', text: 'Select entry fee & find match', icon: '💰' },
                   { step: '2', text: 'Wait for another player', icon: '⏳' },
                   { step: '3', text: 'Both players get a random card', icon: '🃏' },
-                  { step: '4', text: 'Higher card wins 2× entry fee!', icon: '🏆' },
+                  { step: '4', text: 'Higher card wins 1.8× entry fee!', icon: '🏆' },
                 ].map(({ step, text, icon }) => (
                   <div key={step} className="flex items-center gap-3 text-sm">
                     <span className="text-2xl">{icon}</span>
@@ -200,7 +225,7 @@ export const Matchmaking: React.FC = () => {
             <div className="bg-white/5 border border-white/10 rounded-2xl p-5">
               <p className="text-sm font-medium text-gray-300 mb-3">Select Entry Fee</p>
               <div className="grid grid-cols-3 gap-3 mb-4">
-                {ENTRY_FEES.map(fee => (
+                {ENTRY_FEES.map((fee) => (
                   <motion.button
                     key={fee}
                     whileHover={{ scale: 1.04 }}
@@ -221,7 +246,9 @@ export const Matchmaking: React.FC = () => {
 
               <div className="flex items-center justify-between text-xs text-gray-500 mb-4">
                 <span>Usable Balance: {formatCurrency(usableBalance)}</span>
-                {selectedFee && <span>Potential win: ₹{(selectedFee * 1.8).toFixed(0)}</span>}
+                {selectedFee && (
+                  <span>Potential win: ₹{(selectedFee * 1.8).toFixed(0)}</span>
+                )}
               </div>
 
               <motion.button
@@ -232,9 +259,13 @@ export const Matchmaking: React.FC = () => {
                 className="w-full bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-400 hover:to-indigo-400 text-white font-bold py-4 rounded-xl disabled:opacity-50 flex items-center justify-center gap-2 text-lg"
               >
                 {loading ? (
-                  <><Loader2 className="w-5 h-5 animate-spin" /> Joining...</>
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" /> Joining...
+                  </>
                 ) : (
-                  <><Zap className="w-5 h-5" /> Find Match</>
+                  <>
+                    <Zap className="w-5 h-5" /> Find Match
+                  </>
                 )}
               </motion.button>
             </div>
@@ -247,7 +278,6 @@ export const Matchmaking: React.FC = () => {
             exit={{ opacity: 0, scale: 0.9 }}
             className="text-center space-y-6"
           >
-            {/* Animated searching */}
             <div className="bg-gradient-to-br from-blue-900/40 to-indigo-900/40 border border-blue-500/20 rounded-3xl p-10">
               <motion.div
                 animate={{ rotate: 360 }}
@@ -255,8 +285,10 @@ export const Matchmaking: React.FC = () => {
                 className="w-24 h-24 mx-auto mb-6 relative"
               >
                 <div className="w-24 h-24 rounded-full border-4 border-blue-500/30 border-t-blue-400 absolute inset-0 animate-spin" />
-                <div className="w-16 h-16 rounded-full border-4 border-indigo-500/30 border-t-indigo-400 absolute inset-4 animate-spin-reverse" />
-                <div className="absolute inset-0 flex items-center justify-center text-3xl">🃏</div>
+                <div className="w-16 h-16 rounded-full border-4 border-indigo-500/30 border-t-indigo-400 absolute inset-4 animate-spin" />
+                <div className="absolute inset-0 flex items-center justify-center text-3xl">
+                  🃏
+                </div>
               </motion.div>
 
               <h3 className="text-xl font-bold text-white mb-2">Finding Opponent...</h3>
@@ -272,9 +304,8 @@ export const Matchmaking: React.FC = () => {
                 <span>Searching among {onlinePlayers} online players</span>
               </div>
 
-              {/* Pulsing dots */}
               <div className="flex justify-center gap-2 mt-5">
-                {[0, 1, 2].map(i => (
+                {[0, 1, 2].map((i) => (
                   <motion.div
                     key={i}
                     animate={{ scale: [1, 1.5, 1], opacity: [0.5, 1, 0.5] }}
