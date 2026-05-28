@@ -13,9 +13,6 @@ import {
   performPokerAction,
 } from '../firebase/poker';
 
-// Tumhare existing components same rahenge
-import { PlayingCard, PlayerSeatComp } from './components'; 
-
 export const PokerTablePage: React.FC = () => {
   const { userProfile } = useAuth();
   const navigate = useNavigate();
