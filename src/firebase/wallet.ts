@@ -14,7 +14,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './config';
 import { Wallet, Transaction, TransactionType } from '../types';
-import { calculateUsableBalance } from '../utils/helpers';
+import { calculateUsableBalance, calculateTotalBalance} from '../utils/helpers';
 
 export const getWallet = async (uid: string): Promise<Wallet | null> => {
   const snap = await getDoc(doc(db, 'wallets', uid));
@@ -65,7 +65,7 @@ export const addFunds = async (
       type: type === 'depositBalance' ? 'DEPOSIT' : type === 'winningBalance' ? 'GAME_WIN' : type === 'bonusBalance' ? 'BONUS' : 'REFERRAL',
       amount,
       previousBalance,
-      currentBalance: newBalance,
+      currentBalance: currentBalance,
       status: 'COMPLETED',
       description,
       createdAt: serverTimestamp(),
@@ -123,16 +123,15 @@ export const deductFunds = async (
       throw new Error('Insufficient usable balance');
     }
 
-    const previousBalance = wallet.totalBalance;
-    const newTotal = wallet.totalBalance - amount;
+    const previousBalance = calculateTotalBalance(wallet);
+    const currentBalance = previousBalance - amount;
 
     tx.update(walletRef, {
-      winningBalance: newWinning,
-      referralBalance: newReferral,
-      bonusBalance: newBonus,
-      totalBalance: newTotal,
-      updatedAt: serverTimestamp(),
-    });
+    winningBalance: newWinning,
+    referralBalance: newReferral,
+    bonusBalance: newBonus,
+    updatedAt: serverTimestamp(),
+  });
 
     const txRef = doc(collection(db, 'transactions'));
     tx.set(txRef, {
@@ -164,15 +163,14 @@ export const withdrawFunds = async (uid: string, amount: number, upiId: string) 
       throw new Error('Insufficient winning balance for withdrawal');
     }
 
-    const previousBalance = wallet.totalBalance;
+    const previousBalance = calculateTotalBalance(wallet);
     const newWinning = wallet.winningBalance - amount;
-    const newTotal = wallet.totalBalance - amount;
+    const currentBalance = previousBalance - amount;
 
-    tx.update(walletRef, {
-      winningBalance: newWinning,
-      totalBalance: newTotal,
-      updatedAt: serverTimestamp(),
-    });
+   tx.update(walletRef, {
+   winningBalance: newWinning,
+   updatedAt: serverTimestamp(),
+});
 
     const userRef = doc(db, 'users', uid);
     const userSnap = await tx.get(userRef);
