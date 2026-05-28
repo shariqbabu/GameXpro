@@ -264,3 +264,43 @@ export interface PokerPlayer {
   isFolded: boolean;
   isReady: boolean;
 }
+
+// src/types/index.ts mein add karo
+
+export type DragonTigerBetType = 'dragon' | 'tiger' | 'tie';
+
+export interface DragonTigerBet {
+  uid: string;
+  username: string;
+  betType: DragonTigerBetType;
+  amount: number;
+}
+
+export interface DragonTigerCard {
+  suit: 'hearts' | 'diamonds' | 'clubs' | 'spades';
+  value: string;
+  numericValue: number;
+}
+
+export interface DragonTigerTable {
+  id: string;
+  name: string;
+  stage: 'waiting' | 'betting' | 'result';
+  hostUid: string;
+  currentRound: number;
+  roundTimer: number;
+  pot: number;
+  minBet: number;
+  maxBet: number;
+  dragonCard: DragonTigerCard | null;
+  tigerCard: DragonTigerCard | null;
+  winner: DragonTigerBetType | null;
+  bets: DragonTigerBet[];
+  dragonTotal: number;
+  tigerTotal: number;
+  tieTotal: number;
+  players: string[];
+  spectators: string[];
+  createdAt: any;
+  updatedAt: any;
+}
