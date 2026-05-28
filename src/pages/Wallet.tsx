@@ -16,9 +16,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 
 import {
-  formatCurrency,
-  calculateTotalBalance,
-} from '../utils/helpers';
+  formatCurrency, calculateTotalBalance, calculateUsableBalance, } from '../utils/helpers';
 
 export const Wallet: React.FC = () => {
 
@@ -126,15 +124,14 @@ export const Wallet: React.FC = () => {
           </div>
 
           <p className="text-5xl font-bold text-white mb-1">
-            {formatCurrency(
-  calculateTotalBalance(wallet))}
+           {formatCurrency(wallet? calculateTotalBalance(wallet))}
           </p>
 
           <p className="text-sm text-gray-400">
-              Withdrawable Balance:{' '}
+              Useable in game:{' '}
 
             <span className="text-green-400 font-semibold">
-              {formatCurrency(wallet?.winningBalance || 0)}
+               {formatCurrency(wallet? calculateUsableBalance(wallet))}
             </span>
           </p>
 
