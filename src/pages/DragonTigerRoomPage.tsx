@@ -19,6 +19,27 @@ import {
 } from '../types';
 import toast from 'react-hot-toast';
 
+const { firebaseUser, user, wallet, loading: authLoading } = useAuth();
+
+const uid =
+  firebaseUser?.uid ||
+  user?.id ||
+  (user as any)?.uid ||
+  '';
+
+const username =
+  (user as any)?.username ||
+  (user as any)?.name ||
+  firebaseUser?.displayName ||
+  firebaseUser?.email?.split('@')[0] ||
+  'Player';
+
+const walletBalance =
+  (wallet?.depositBalance || 0) +
+  (wallet?.winningBalance || 0) +
+  (wallet?.referralBalance || 0) +
+  (wallet?.bonusBalance || 0);
+
 const BET_AMOUNTS = [50, 100, 500, 1000, 5000];
 
 // Card Display Component
@@ -117,31 +138,59 @@ export const DragonTigerRoomPage: React.FC = () => {
   }, [table?.stage, table?.hostUid, uid, tableId]);
 
   const handleBet = useCallback(async () => {
-    if (!selectedBet || !uid || !tableId) return;
-    if (!table) return;
+  if (authLoading) {
+    toast.error('Please wait, loading account...');
+    return;
+  }
 
-    const walletBalance =
-      (userProfile as any)?.wallet?.depositBalance +
-      (userProfile as any)?.wallet?.winningBalance || 0;
+  if (!uid) {
+    toast.error('Please login first');
+    return;
+  }
 
-    if (betAmount > walletBalance) {
-      toast.error('Insufficient balance');
-      return;
-    }
+  if (!selectedBet || !tableId) {
+    toast.error('Please select a bet');
+    return;
+  }
 
-    setLoading(true);
-    try {
-      await placeDragonTigerBet(
-        tableId, uid, username, selectedBet, betAmount
-      );
-      toast.success(`₹${betAmount} placed on ${selectedBet.toUpperCase()}!`);
-      setSelectedBet(null);
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to place bet');
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedBet, uid, tableId, betAmount, username, table]);
+  if (!table) {
+    toast.error('Table not loaded');
+    return;
+  }
+
+  if (betAmount > walletBalance) {
+    toast.error('Insufficient balance');
+    return;
+  }
+
+  setLoading(true);
+
+  try {
+    await placeDragonTigerBet(
+      tableId,
+      uid,
+      username,
+      selectedBet,
+      betAmount
+    );
+
+    toast.success(`₹${betAmount} placed on ${selectedBet.toUpperCase()}!`);
+    setSelectedBet(null);
+  } catch (err: any) {
+    toast.error(err.message || 'Failed to place bet');
+  } finally {
+    setLoading(false);
+  }
+}, [
+  authLoading,
+  uid,
+  selectedBet,
+  tableId,
+  table,
+  betAmount,
+  walletBalance,
+  username,
+]);
 
   const userBets = table?.bets?.filter((b) => b.uid === uid) || [];
   const totalUserBet = userBets.reduce((sum, b) => sum + b.amount, 0);
