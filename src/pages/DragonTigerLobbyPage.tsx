@@ -19,24 +19,6 @@ export const DragonTigerLobbyPage: React.FC = () => {
   const [maxBet, setMaxBet] = useState(5000);
 
   const uid = firebaseUser?.uid || user?.id || (user as any)?.uid ||'';
-  const userName =
-  (user as any)?.username ||
-  (user as any)?.name ||
-  firebaseUser?.displayName ||
-  firebaseUser?.email?.split('@')[0] ||
-  'Player';
-
-  const photoURL =
-  (user as any)?.photoURL ||
-  (user as any)?.avatar ||
-  firebaseUser?.photoURL ||
-  '';
-
-  const walletBalance =
-  (wallet?.depositBalance || 0) +
-  (wallet?.winningBalance || 0) +
-  (wallet?.referralBalance || 0) +
-  (wallet?.bonusBalance || 0);
 
   useEffect(() => {
     const unsub = getActiveTables((t) => setTables(t));
