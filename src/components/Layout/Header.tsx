@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
 import { useAppStore } from '../../store/useStore';
 import { formatCurrency } from '../../utils/helpers';
+import { calculateTotalBalance } from '../../utils/helpers';
 
 const pageTitles: Record<string, string> = {
   '/dashboard': 'Dashboard',
@@ -52,7 +53,7 @@ export const Header: React.FC = () => {
               >
                 <Wallet className="w-4 h-4 text-yellow-400" />
                 <span className="text-sm font-bold text-yellow-400">
-                  {formatCurrency(wallet.totalBalance)}
+                  {formatCurrency(calculateTotalBalance(wallet))}
                 </span>
               </motion.div>
             </Link>
