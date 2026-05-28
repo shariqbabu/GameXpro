@@ -44,8 +44,6 @@ const gameItems = [
   { path: '/games/color-prediction', icon: Palette, label: 'Color Prediction', color: 'text-red-400' },
   { path: '/matchmaking', icon: Spade, label: 'Card Battle', color: 'text-blue-400' },
   { path: '/games/dice', icon: Dice5, label: 'Dice Game', color: 'text-green-400' },
-  { path: '/poker', icon: Spade, label: 'Poker', badge: 'New', badgeColor: 'amber' },
-  { path: '/dragon-tiger', icon: Swords, label: 'Dragon Tiger', badge: 'New', badgeColor: 'red' },
 ];
 
 export const Sidebar: React.FC = () => {
