@@ -13,6 +13,67 @@ import {
   performPokerAction,
 } from '../firebase/poker';
 
+const PlayingCard: React.FC<{
+  card: any;
+  size?: 'sm' | 'md' | 'lg';
+  animate?: boolean;
+}> = ({ card, size = 'md', animate = true }) => {
+  const sizeMap = {
+    sm: 'w-8 h-12 text-xs rounded-md',
+    md: 'w-12 h-[72px] text-sm rounded-lg',
+    lg: 'w-16 h-24 text-base rounded-xl',
+  };
+
+  const suitSymbols: Record<string, string> = {
+    hearts: '♥',
+    diamonds: '♦',
+    clubs: '♣',
+    spades: '♠',
+  };
+
+  const isRed = card?.suit === 'hearts' || card?.suit === 'diamonds';
+
+  if (!card || card.faceDown) {
+    return (
+      <motion.div
+        className={`${sizeMap[size]} bg-gradient-to-br from-blue-800 to-blue-900 border-2 border-blue-600 flex items-center justify-center shadow-lg`}
+      >
+        <div className="text-blue-400 text-lg opacity-60">♠</div>
+      </motion.div>
+    );
+  }
+
+  return (
+    <motion.div
+      initial={animate ? { rotateY: 90, scale: 0.5 } : {}}
+      animate={animate ? { rotateY: 0, scale: 1 } : {}}
+      transition={{ type: 'spring', damping: 15, stiffness: 200 }}
+      whileHover={{ y: -5, scale: 1.05 }}
+      className={`${sizeMap[size]} bg-white flex flex-col justify-between p-1 shadow-xl relative overflow-hidden`}
+    >
+      <div
+        className={`font-bold leading-none ${
+          isRed ? 'text-red-500' : 'text-gray-900'
+        }`}
+      >
+        <div>{card.value}</div>
+        <div>{suitSymbols[card.suit] || '♠'}</div>
+      </div>
+
+      <div
+        className={`font-bold leading-none rotate-180 ${
+          isRed ? 'text-red-500' : 'text-gray-900'
+        }`}
+      >
+        <div>{card.value}</div>
+        <div>{suitSymbols[card.suit] || '♠'}</div>
+      </div>
+
+      <div className="absolute top-0 left-0 w-1/2 h-full bg-gradient-to-r from-white/30 to-transparent pointer-events-none" />
+    </motion.div>
+  );
+};
+
 export const PokerTablePage: React.FC = () => {
   const { firebaseUser, user, wallet, loading: authLoading } = useAuth();
 
