@@ -73,12 +73,20 @@ export const subscribeMatchmakingQueue = (
   });
 };
 
+/**
+ * MATCHMAKING LOGIC:
+ * - Dono players poll karte hain
+ * - Jo player BAAD mein aaya (newer createdAt) woh MATCHER hai — woh room banata hai
+ * - Jo pehle aaya (older) woh sirf wait karta hai subscribeMatchmakingQueue se
+ * - Isse conflict nahi hota — sirf ek hi room banta hai
+ */
 export const findMatch = async (
   uid: string,
   queueId: string,
   entryFee: number,
   gameType: string
 ): Promise<string | null> => {
+  // Sabse purani WAITING entries dhundo (pehle aaye players)
   const q = query(
     collection(db, 'matchmakingQueue'),
     where('status', '==', 'WAITING'),
@@ -89,76 +97,97 @@ export const findMatch = async (
   );
 
   const snap = await getDocs(q);
-  const others = snap.docs.filter((d) => d.data().uid !== uid);
+  const allWaiting = snap.docs;
 
-  if (others.length === 0) return null;
+  // Apni entry dhundo
+  const myEntry = allWaiting.find((d) => d.id === queueId);
+  if (!myEntry) return null; // apni entry nahi mili — already matched/cancelled
 
+  // Doosre players dhundo
+  const others = allWaiting.filter((d) => d.data().uid !== uid);
+  if (others.length === 0) return null; // koi opponent nahi
+
+  // KEY FIX: Sirf NEWER player (baad mein aaya) room banata hai
+  // Older player (pehle aaya) sirf wait karta hai
+  const myCreatedAt = myEntry.data().createdAt?.toMillis?.() ?? 0;
   const opponent = others[0];
+  const opponentCreatedAt = opponent.data().createdAt?.toMillis?.() ?? 0;
 
-  // FIX: roomRef ko transaction ke BAHAR banao
-  // taaki roomId reliably mile — transaction ke andar
-  // closure update hona guaranteed nahi hota
+  // Agar main pehle aaya hoon toh main sirf wait karunga
+  // Opponent (baad mein aaya) room banayega
+  if (myCreatedAt <= opponentCreatedAt) {
+    return null; // main older hoon — wait karo, opponent room banayega
+  }
+
+  // Main newer hoon — mera kaam hai room banana
   const roomRef = doc(collection(db, 'gameRooms'));
-  const roomId = roomRef.id; // ab yeh guaranteed available hai
+  const roomId = roomRef.id;
 
-  await runTransaction(db, async (tx) => {
-    // ── READS (sabse pehle) ──────────────────────────────────────────────────
-    const myQueueRef = doc(db, 'matchmakingQueue', queueId);
-    const opponentQueueRef = doc(db, 'matchmakingQueue', opponent.id);
+  try {
+    await runTransaction(db, async (tx) => {
+      // ── READS (sabse pehle) ────────────────────────────────────────────────
+      const myQueueRef = doc(db, 'matchmakingQueue', queueId);
+      const opponentQueueRef = doc(db, 'matchmakingQueue', opponent.id);
 
-    const [mySnap, oppSnap] = await Promise.all([
-      tx.get(myQueueRef),
-      tx.get(opponentQueueRef),
-    ]);
+      const [mySnap, oppSnap] = await Promise.all([
+        tx.get(myQueueRef),
+        tx.get(opponentQueueRef),
+      ]);
 
-    if (!mySnap.exists() || !oppSnap.exists()) {
-      throw new Error('Queue entry not found');
-    }
-    if (mySnap.data().status !== 'WAITING' || oppSnap.data().status !== 'WAITING') {
-      throw new Error('Already matched');
-    }
+      if (!mySnap.exists() || !oppSnap.exists()) {
+        throw new Error('Queue entry not found');
+      }
+      if (mySnap.data().status !== 'WAITING' || oppSnap.data().status !== 'WAITING') {
+        throw new Error('Already matched');
+      }
 
-    const myData = mySnap.data();
-    const oppData = oppSnap.data();
+      const myData = mySnap.data();
+      const oppData = oppSnap.data();
 
-    // ── COMPUTE ──────────────────────────────────────────────────────────────
-    const player1: PlayerInfo = {
-      uid: oppData.uid,
-      name: oppData.userName,
-      photoURL: oppData.photoURL || '',
-    };
+      // ── COMPUTE ────────────────────────────────────────────────────────────
+      // Older player = player1, newer (me) = player2
+      const player1: PlayerInfo = {
+        uid: oppData.uid,
+        name: oppData.userName,
+        photoURL: oppData.photoURL || '',
+      };
 
-    const player2: PlayerInfo = {
-      uid: myData.uid,
-      name: myData.userName,
-      photoURL: myData.photoURL || '',
-    };
+      const player2: PlayerInfo = {
+        uid: myData.uid,
+        name: myData.userName,
+        photoURL: myData.photoURL || '',
+      };
 
-    // ── WRITES ───────────────────────────────────────────────────────────────
-    tx.set(roomRef, {
-      roomId,
-      gameType,
-      entryFee,
-      status: 'WAITING',
-      player1,
-      player2,
-      winner: null,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+      // ── WRITES ─────────────────────────────────────────────────────────────
+      tx.set(roomRef, {
+        roomId,
+        gameType,
+        entryFee,
+        status: 'WAITING',
+        player1,
+        player2,
+        winner: null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.update(myQueueRef, {
+        status: 'MATCHED',
+        roomId,
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.update(opponentQueueRef, {
+        status: 'MATCHED',
+        roomId,
+        updatedAt: serverTimestamp(),
+      });
     });
-
-    tx.update(myQueueRef, {
-      status: 'MATCHED',
-      roomId,
-      updatedAt: serverTimestamp(),
-    });
-
-    tx.update(opponentQueueRef, {
-      status: 'MATCHED',
-      roomId,
-      updatedAt: serverTimestamp(),
-    });
-  });
+  } catch (err: any) {
+    // Already matched by someone else — normal race condition, ignore
+    if (err.message === 'Already matched') return null;
+    throw err;
+  }
 
   return roomId;
 };
@@ -259,9 +288,6 @@ export const settleCardGame = async (
       updatedAt: serverTimestamp(),
     });
 
-    // FIX: loser ka previousBalance/currentBalance 0 nahi hona chahiye
-    // wallet.ts ka deductFunds already transaction record banata hai
-    // yahan sirf GAME_LOSS record ke liye addDoc karo
     await addDoc(collection(db, 'transactions'), {
       uid: loserId,
       type: 'GAME_LOSS',
@@ -317,8 +343,7 @@ export const placeBet = async (
   color: ColorChoice,
   amount: number
 ) => {
-  // FIX: round existence + status check PEHLE, deduct BAAD mein
-  // Pehle wale code mein funds deduct ho jaate the lekin round closed hoti thi
+  // Validate PEHLE, phir deduct
   const roundRef = doc(db, 'colorPredictionGames', roundId);
   const roundSnap = await getDoc(roundRef);
   if (!roundSnap.exists()) throw new Error('Round not found');
@@ -329,7 +354,6 @@ export const placeBet = async (
   const existingBet = round.bets?.find((b: any) => b.uid === uid);
   if (existingBet) throw new Error('Already placed a bet in this round');
 
-  // Ab safe hai deduct karna
   await deductFunds(uid, amount, 'GAME_LOSS', `Color prediction bet - ${color}`);
 
   const multiplier = color === 'VIOLET' ? 3 : 2;
