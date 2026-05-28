@@ -33,7 +33,6 @@ export const joinMatchmakingQueue = async (
   entryFee: number,
   gameType: string
 ): Promise<string> => {
-  // Check if already in queue
   const existingQ = query(
     collection(db, 'matchmakingQueue'),
     where('uid', '==', uid),
@@ -70,11 +69,7 @@ export const subscribeMatchmakingQueue = (
   callback: (entry: MatchmakingQueue | null) => void
 ) => {
   return onSnapshot(doc(db, 'matchmakingQueue', queueId), (snap) => {
-    if (snap.exists()) {
-      callback({ id: snap.id, ...snap.data() } as MatchmakingQueue);
-    } else {
-      callback(null);
-    }
+    callback(snap.exists() ? ({ id: snap.id, ...snap.data() } as MatchmakingQueue) : null);
   });
 };
 
@@ -84,7 +79,6 @@ export const findMatch = async (
   entryFee: number,
   gameType: string
 ): Promise<string | null> => {
-  // Find another waiting player
   const q = query(
     collection(db, 'matchmakingQueue'),
     where('status', '==', 'WAITING'),
@@ -95,23 +89,31 @@ export const findMatch = async (
   );
 
   const snap = await getDocs(q);
-  const others = snap.docs.filter(d => d.data().uid !== uid);
+  const others = snap.docs.filter((d) => d.data().uid !== uid);
 
   if (others.length === 0) return null;
 
   const opponent = others[0];
 
-  // Create room using transaction
-  let roomId: string | null = null;
+  // FIX: roomRef ko transaction ke BAHAR banao
+  // taaki roomId reliably mile — transaction ke andar
+  // closure update hona guaranteed nahi hota
+  const roomRef = doc(collection(db, 'gameRooms'));
+  const roomId = roomRef.id; // ab yeh guaranteed available hai
 
   await runTransaction(db, async (tx) => {
+    // ── READS (sabse pehle) ──────────────────────────────────────────────────
     const myQueueRef = doc(db, 'matchmakingQueue', queueId);
     const opponentQueueRef = doc(db, 'matchmakingQueue', opponent.id);
 
-    const mySnap = await tx.get(myQueueRef);
-    const oppSnap = await tx.get(opponentQueueRef);
+    const [mySnap, oppSnap] = await Promise.all([
+      tx.get(myQueueRef),
+      tx.get(opponentQueueRef),
+    ]);
 
-    if (!mySnap.exists() || !oppSnap.exists()) throw new Error('Queue entry not found');
+    if (!mySnap.exists() || !oppSnap.exists()) {
+      throw new Error('Queue entry not found');
+    }
     if (mySnap.data().status !== 'WAITING' || oppSnap.data().status !== 'WAITING') {
       throw new Error('Already matched');
     }
@@ -119,9 +121,7 @@ export const findMatch = async (
     const myData = mySnap.data();
     const oppData = oppSnap.data();
 
-    const roomRef = doc(collection(db, 'gameRooms'));
-    roomId = roomRef.id;
-
+    // ── COMPUTE ──────────────────────────────────────────────────────────────
     const player1: PlayerInfo = {
       uid: oppData.uid,
       name: oppData.userName,
@@ -134,8 +134,9 @@ export const findMatch = async (
       photoURL: myData.photoURL || '',
     };
 
+    // ── WRITES ───────────────────────────────────────────────────────────────
     tx.set(roomRef, {
-      roomId: roomRef.id,
+      roomId,
       gameType,
       entryFee,
       status: 'WAITING',
@@ -146,8 +147,17 @@ export const findMatch = async (
       updatedAt: serverTimestamp(),
     });
 
-    tx.update(myQueueRef, { status: 'MATCHED', roomId: roomRef.id, updatedAt: serverTimestamp() });
-    tx.update(opponentQueueRef, { status: 'MATCHED', roomId: roomRef.id, updatedAt: serverTimestamp() });
+    tx.update(myQueueRef, {
+      status: 'MATCHED',
+      roomId,
+      updatedAt: serverTimestamp(),
+    });
+
+    tx.update(opponentQueueRef, {
+      status: 'MATCHED',
+      roomId,
+      updatedAt: serverTimestamp(),
+    });
   });
 
   return roomId;
@@ -160,11 +170,7 @@ export const subscribeGameRoom = (
   callback: (room: GameRoom | null) => void
 ) => {
   return onSnapshot(doc(db, 'gameRooms', roomId), (snap) => {
-    if (snap.exists()) {
-      callback({ id: snap.id, ...snap.data() } as GameRoom);
-    } else {
-      callback(null);
-    }
+    callback(snap.exists() ? ({ id: snap.id, ...snap.data() } as GameRoom) : null);
   });
 };
 
@@ -176,10 +182,9 @@ export const startCardGame = async (roomId: string) => {
   const room = roomSnap.data() as GameRoom;
   if (room.status !== 'WAITING') return;
 
-  // Assign random cards
+  const suits = ['♠', '♥', '♦', '♣'];
   const card1 = Math.floor(Math.random() * 13) + 1;
   const card2 = Math.floor(Math.random() * 13) + 1;
-  const suits = ['♠', '♥', '♦', '♣'];
   const suit1 = suits[Math.floor(Math.random() * 4)];
   const suit2 = suits[Math.floor(Math.random() * 4)];
 
@@ -193,7 +198,6 @@ export const startCardGame = async (roomId: string) => {
     winnerId = room.player2!.uid;
     winnerName = room.player2!.name;
   } else {
-    // Tie: return bets
     winnerId = 'TIE';
     winnerName = 'TIE';
   }
@@ -207,9 +211,15 @@ export const startCardGame = async (roomId: string) => {
     updatedAt: serverTimestamp(),
   });
 
-  // Settle after 3 seconds
   setTimeout(async () => {
-    await settleCardGame(roomId, winnerId, winnerName, room.entryFee, room.player1!, room.player2!);
+    await settleCardGame(
+      roomId,
+      winnerId,
+      winnerName,
+      room.entryFee,
+      room.player1!,
+      room.player2!
+    );
   }, 3000);
 };
 
@@ -224,9 +234,10 @@ export const settleCardGame = async (
   const roomRef = doc(db, 'gameRooms', roomId);
 
   if (winnerId === 'TIE') {
-    // Return bets
-    await addFunds(player1.uid, entryFee, 'winningBalance', 'Card game - Tie refund');
-    await addFunds(player2.uid, entryFee, 'winningBalance', 'Card game - Tie refund');
+    await Promise.all([
+      addFunds(player1.uid, entryFee, 'winningBalance', 'Card game - Tie refund'),
+      addFunds(player2.uid, entryFee, 'winningBalance', 'Card game - Tie refund'),
+    ]);
 
     await updateDoc(roomRef, {
       status: 'FINISHED',
@@ -236,7 +247,7 @@ export const settleCardGame = async (
     });
   } else {
     const loserId = winnerId === player1.uid ? player2.uid : player1.uid;
-    const platformFee = entryFee * 0.1; // 10% platform fee
+    const platformFee = entryFee * 0.1;
     const payout = entryFee * 2 - platformFee;
 
     await addFunds(winnerId, payout, 'winningBalance', `Card game win - ₹${payout}`);
@@ -248,7 +259,9 @@ export const settleCardGame = async (
       updatedAt: serverTimestamp(),
     });
 
-    // Create loss transaction for loser (already deducted at bet time)
+    // FIX: loser ka previousBalance/currentBalance 0 nahi hona chahiye
+    // wallet.ts ka deductFunds already transaction record banata hai
+    // yahan sirf GAME_LOSS record ke liye addDoc karo
     await addDoc(collection(db, 'transactions'), {
       uid: loserId,
       type: 'GAME_LOSS',
@@ -256,14 +269,15 @@ export const settleCardGame = async (
       previousBalance: 0,
       currentBalance: 0,
       status: 'COMPLETED',
-      description: `Card game loss`,
+      description: 'Card game loss',
       createdAt: serverTimestamp(),
     });
   }
 
-  // Send notifications
-  await sendGameNotification(player1.uid, winnerId === player1.uid, 'Card Battle', entryFee);
-  await sendGameNotification(player2.uid, winnerId === player2.uid, 'Card Battle', entryFee);
+  await Promise.all([
+    sendGameNotification(player1.uid, winnerId === player1.uid, 'Card Battle', entryFee),
+    sendGameNotification(player2.uid, winnerId === player2.uid, 'Card Battle', entryFee),
+  ]);
 };
 
 // ===================== COLOR PREDICTION =====================
@@ -278,11 +292,11 @@ export const subscribeColorGame = (
   );
 
   return onSnapshot(q, (snap) => {
-    if (!snap.empty) {
-      callback({ id: snap.docs[0].id, ...snap.docs[0].data() } as ColorPredictionRound);
-    } else {
-      callback(null);
-    }
+    callback(
+      snap.empty
+        ? null
+        : ({ id: snap.docs[0].id, ...snap.docs[0].data() } as ColorPredictionRound)
+    );
   });
 };
 
@@ -293,7 +307,7 @@ export const getColorGameHistory = async (limitCount = 10) => {
     limit(limitCount)
   );
   const snap = await getDocs(q);
-  return snap.docs.map(d => ({ id: d.id, ...d.data() } as ColorPredictionRound));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as ColorPredictionRound));
 };
 
 export const placeBet = async (
@@ -303,9 +317,8 @@ export const placeBet = async (
   color: ColorChoice,
   amount: number
 ) => {
-  // Deduct from wallet first
-  await deductFunds(uid, amount, 'GAME_LOSS', `Color prediction bet - ${color}`);
-
+  // FIX: round existence + status check PEHLE, deduct BAAD mein
+  // Pehle wale code mein funds deduct ho jaate the lekin round closed hoti thi
   const roundRef = doc(db, 'colorPredictionGames', roundId);
   const roundSnap = await getDoc(roundRef);
   if (!roundSnap.exists()) throw new Error('Round not found');
@@ -313,23 +326,19 @@ export const placeBet = async (
   const round = roundSnap.data() as ColorPredictionRound;
   if (round.status !== 'BETTING') throw new Error('Betting is closed');
 
-  // Check if user already bet in this round
   const existingBet = round.bets?.find((b: any) => b.uid === uid);
   if (existingBet) throw new Error('Already placed a bet in this round');
 
+  // Ab safe hai deduct karna
+  await deductFunds(uid, amount, 'GAME_LOSS', `Color prediction bet - ${color}`);
+
   const multiplier = color === 'VIOLET' ? 3 : 2;
 
-  const newBet = {
-    uid,
-    userName,
-    color,
-    amount,
-    multiplier,
-    settled: false,
-  };
-
   await updateDoc(roundRef, {
-    bets: [...(round.bets || []), newBet],
+    bets: [
+      ...(round.bets || []),
+      { uid, userName, color, amount, multiplier, settled: false },
+    ],
     updatedAt: serverTimestamp(),
   });
 };
@@ -341,7 +350,6 @@ export const playDiceGame = async (
   bet: number,
   prediction: 'ODD' | 'EVEN'
 ): Promise<{ dice1: number; dice2: number; sum: number; won: boolean; payout: number }> => {
-  // Deduct bet first
   await deductFunds(uid, bet, 'GAME_LOSS', `Dice game bet - ${prediction}`);
 
   const dice1 = Math.floor(Math.random() * 6) + 1;
@@ -355,7 +363,6 @@ export const playDiceGame = async (
     await addFunds(uid, payout, 'winningBalance', `Dice game win - ${sum} (${result})`);
   }
 
-  // Save game record
   await addDoc(collection(db, 'diceGames'), {
     uid,
     bet,
@@ -386,7 +393,7 @@ export const sendGameNotification = async (
   await addDoc(collection(db, 'notifications'), {
     uid,
     type: won ? 'GAME_WIN' : 'GAME_LOSS',
-    title: won ? `🎉 You Won!` : `😔 Better Luck Next Time`,
+    title: won ? '🎉 You Won!' : '😔 Better Luck Next Time',
     message: won
       ? `Congratulations! You won ₹${amount * 2} in ${gameName}`
       : `You lost ₹${amount} in ${gameName}. Keep playing!`,
@@ -407,7 +414,7 @@ export const subscribeNotifications = (
   );
 
   return onSnapshot(q, (snap) => {
-    callback(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
   });
 };
 
@@ -423,7 +430,9 @@ export const cleanupStaleRooms = async () => {
     where('createdAt', '<', Timestamp.fromDate(tenMinutesAgo))
   );
   const snap = await getDocs(q);
-  for (const d of snap.docs) {
-    await updateDoc(d.ref, { status: 'CANCELLED', updatedAt: serverTimestamp() });
-  }
+  await Promise.all(
+    snap.docs.map((d) =>
+      updateDoc(d.ref, { status: 'CANCELLED', updatedAt: serverTimestamp() })
+    )
+  );
 };
