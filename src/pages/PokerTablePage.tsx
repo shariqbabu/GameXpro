@@ -11,7 +11,7 @@ import {
   findPokerMatch,
   subscribePokerRoom,
   performPokerAction,
-} from '../services/poker';
+} from '../firebase/poker';
 
 // Tumhare existing components same rahenge
 import { PlayingCard, PlayerSeatComp } from './components'; 
