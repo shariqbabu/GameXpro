@@ -76,6 +76,17 @@ const PlayingCard: React.FC<{
 
 export const PokerTablePage: React.FC = () => {
 
+const { firebaseUser, user, wallet, loading: authLoading } = useAuth();
+const userName =
+  user?.username ||
+  firebaseUser?.displayName ||
+  'Player';
+
+const photoURL =
+  user?.photoURL ||
+  firebaseUser?.photoURL ||
+  '';
+  
   // ── States ──────────────────────────────────────────────
   const [gameState, setGameState] = useState<
     'table-select' | 'matchmaking' | 'playing'
@@ -91,19 +102,7 @@ export const PokerTablePage: React.FC = () => {
   const matchmakingInterval = useRef<NodeJS.Timeout | null>(null);
   const unsubQueue = useRef<(() => void) | null>(null);
   const unsubRoom = useRef<(() => void) | null>(null);
-
-  const uid = firebaseUser?.uid || '';
-
-const userName =
-  user?.username ||
-  firebaseUser?.displayName ||
-  'Player';
-
-const photoURL =
-  user?.photoURL ||
-  firebaseUser?.photoURL ||
-  '';
-
+  
   const TABLES = [
     { id: 't1', name: 'Beginner Table', blinds: '₹5/₹10', entryFee: 50 },
     { id: 't2', name: 'Classic Texas', blinds: '₹25/₹50', entryFee: 200 },
