@@ -25,8 +25,6 @@ import { GameRoom } from './pages/GameRoom';
 import { ColorPrediction } from './pages/games/ColorPrediction';
 import { DiceGame } from './pages/games/DiceGame';
 
-import { DragonTigerLobbyPage } from './pages/DragonTigerLobbyPage';
-import { DragonTigerRoomPage } from './pages/DragonTigerRoomPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
