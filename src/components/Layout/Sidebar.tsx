@@ -23,7 +23,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { logOut } from '../../firebase/auth';
 import { useAppStore } from '../../store/useStore';
-import { formatCurrency } from '../../utils/helpers';
+import { calculateTotalBalance } from '../../utils/helpers';
 import toast from 'react-hot-toast';
 
 const navItems = [
@@ -122,7 +122,9 @@ export const Sidebar: React.FC = () => {
             {wallet && (
               <div className="bg-black/30 rounded-lg p-2 text-center">
                 <p className="text-xs text-gray-400">Total Balance</p>
-                <p className="text-lg font-bold text-yellow-400">{formatCurrency(wallet.totalBalance)}</p>
+                <p className="text-lg font-bold text-yellow-400">{formatCurrency(
+  calculateTotalBalance(wallet)
+)}</p>
               </div>
             )}
           </div>
