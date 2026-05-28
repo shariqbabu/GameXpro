@@ -24,7 +24,7 @@ import { Matchmaking } from './pages/Matchmaking';
 import { GameRoom } from './pages/GameRoom';
 import { ColorPrediction } from './pages/games/ColorPrediction';
 import { DiceGame } from './pages/games/DiceGame';
-import { PokerTablePage } from './pages/PokerTablePage';
+
 import { DragonTigerLobbyPage } from './pages/DragonTigerLobbyPage';
 import { DragonTigerRoomPage } from './pages/DragonTigerRoomPage';
 
@@ -65,7 +65,7 @@ export default function App() {
                 <Route path="/game-room/:roomId" element={<GameRoom />} />
                 <Route path="/games/color-prediction" element={<ColorPrediction />} />
                 <Route path="/games/dice" element={<DiceGame />} />
-                <Route path="poker" element={<PokerTablePage />} />
+                
                 <Route path="dragon-tiger" element={<DragonTigerLobbyPage />} />
                 <Route path="dragon-tiger/:tableId" element={<DragonTigerRoomPage />} />
                 {/* Admin routes */}
