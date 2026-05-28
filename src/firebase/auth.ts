@@ -68,7 +68,6 @@ export const signUp = async (
 
     tx.set(walletRef, {
       uid: user.uid,
-      totalBalance: 0,
       winningBalance: 0,
       depositBalance: 0,
       bonusBalance: referredBy ? 50 : 0, // Signup bonus if referred
