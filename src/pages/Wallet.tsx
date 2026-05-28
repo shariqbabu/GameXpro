@@ -126,14 +126,15 @@ export const Wallet: React.FC = () => {
           </div>
 
           <p className="text-5xl font-bold text-white mb-1">
-            {formatCurrency(wallet?.totalBalance || 0)}
+            {formatCurrency(
+  calculateTotalBalance(wallet))}
           </p>
 
           <p className="text-sm text-gray-400">
-            Usable in games:{' '}
+              Withdrawable Balance:{' '}
 
             <span className="text-green-400 font-semibold">
-              {formatCurrency(usableBalance)}
+              {formatCurrency(wallet?.winningBalance || 0)}
             </span>
           </p>
 
