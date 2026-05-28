@@ -6,7 +6,6 @@ import {
 } from 'firebase/firestore';
 import { db } from './config';
 import { addFunds, deductFunds } from './wallet';
-import { createDeck, shuffleDeck } from '../utils/helpers';
 
 interface PokerPlayer {
   uid: string;
