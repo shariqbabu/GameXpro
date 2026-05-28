@@ -8,6 +8,18 @@ import { db } from './config';
 import { addFunds, deductFunds } from './wallet';
 import { createDeck, shuffleDeck } from '../utils/helpers';
 
+interface PokerPlayer {
+  uid: string;
+  name: string;
+  photoURL: string;
+  chips: number;
+  cards: any[];
+  currentBet: number;
+  action: string | null;
+  isFolded: boolean;
+  isReady: boolean;
+}
+
 // ===================== JOIN POKER MATCHMAKING =====================
 export const joinPokerQueue = async (
   uid: string,
