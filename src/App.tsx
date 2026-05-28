@@ -24,7 +24,7 @@ import { Matchmaking } from './pages/Matchmaking';
 import { GameRoom } from './pages/GameRoom';
 import { ColorPrediction } from './pages/games/ColorPrediction';
 import { DiceGame } from './pages/games/DiceGame';
-import PokerTablePage from './pages/PokerTablePage';
+import { PokerTablePage } from './pages/PokerTablePage';
 import { DragonTigerLobbyPage } from './pages/DragonTigerLobbyPage';
 import { DragonTigerRoomPage } from './pages/DragonTigerRoomPage';
 
