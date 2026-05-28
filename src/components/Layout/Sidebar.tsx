@@ -14,6 +14,7 @@ import {
   Shield,
   Dice5,
   Spade,
+  Swords,
   Palette,
   X,
   ChevronRight,
